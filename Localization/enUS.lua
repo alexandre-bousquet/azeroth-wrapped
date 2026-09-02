@@ -11,7 +11,7 @@ AW.Locale:Register("enUS", {
     PERIOD_ALL = "All time",
     SINCE_INSTALL = "Since installation",
     CARD_TIME = "TIME IN AZEROTH",
-    CARD_WORLD = "YOUR KINGDOM",
+    CARD_WORLD = "YOUR JOURNEYS",
     CARD_FATE = "TEMPTING FATE",
     CARD_COMPANION = "BEST COMPANION",
     CARD_IDENTITY = "YOUR HEROES",
