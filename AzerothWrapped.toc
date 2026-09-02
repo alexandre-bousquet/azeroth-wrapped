@@ -1,0 +1,30 @@
+## Interface: 120007
+## Title: Azeroth Wrapped
+## Notes: Your adventures, turned into a story worth sharing.
+## Notes-frFR: Vos aventures transformees en une histoire a partager.
+## Author: Worriades
+## Version: 1.0.0
+## SavedVariables: AzerothWrappedDB
+## OptionalDeps: RaiderIO
+## IconTexture: Interface\AddOns\AzerothWrapped\Media\AzerothWrappedIcon.png
+## Category: Collections
+
+Libs\LibStub\LibStub.lua
+Libs\CallbackHandler-1.0\CallbackHandler-1.0.lua
+Libs\LibDataBroker-1.1\LibDataBroker-1.1.lua
+Libs\LibDBIcon-1.0\LibDBIcon-1.0.lua
+
+Core/Bootstrap.lua
+Localization/Locale.lua
+Localization/enUS.lua
+Localization/frFR.lua
+Core/Util.lua
+Core/Database.lua
+Core/Periods.lua
+Core/Summary.lua
+Trackers/Tracker.lua
+UI/Theme.lua
+UI/MainFrame.lua
+UI/DetailPanel.lua
+UI/Options.lua
+Core/Commands.lua
