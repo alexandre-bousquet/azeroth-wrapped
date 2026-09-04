@@ -9,7 +9,7 @@ AW.version = (C_AddOns and C_AddOns.GetAddOnMetadata and C_AddOns.GetAddOnMetada
     or "dev"
 
 AW.CONST = {
-    DB_SCHEMA = 10,
+    DB_SCHEMA = 11,
     SAMPLE_INTERVAL = 1,
     MAX_ACCUMULATION_GAP = 300,
     LIVE_REFRESH_INTERVAL = 5,

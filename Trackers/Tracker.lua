@@ -387,10 +387,22 @@ local function ensureDayCharacter(day, characterKey, character)
             activeSeconds = 0,
             afkSeconds = 0,
             deaths = 0,
+            sessionCount = 0,
+            longestSession = 0,
+            zones = {},
+            activities = {},
+            groupmates = {},
+            npcs = {},
         }
     end
 
     local dayCharacter = day.characters[characterKey]
+    dayCharacter.sessionCount = tonumber(dayCharacter.sessionCount) or 0
+    dayCharacter.longestSession = tonumber(dayCharacter.longestSession) or 0
+    dayCharacter.zones = type(dayCharacter.zones) == "table" and dayCharacter.zones or {}
+    dayCharacter.activities = type(dayCharacter.activities) == "table" and dayCharacter.activities or {}
+    dayCharacter.groupmates = type(dayCharacter.groupmates) == "table" and dayCharacter.groupmates or {}
+    dayCharacter.npcs = type(dayCharacter.npcs) == "table" and dayCharacter.npcs or {}
     dayCharacter.name = character.name
     dayCharacter.realm = character.realm
     dayCharacter.className = character.className
@@ -454,9 +466,13 @@ local function getTrackedMoney()
     return playerMoney + trackedWarbandMoney, playerMoney, warbandMoney, trackedWarbandMoney
 end
 
-function Tracker:MarkSessionForDay(day, dayKey)
+function Tracker:MarkSessionForDay(day, dayKey, characterKey, character)
     if AW.runtime.lastDayKey ~= dayKey then
+        characterKey = characterKey or select(1, Database:TouchCharacter())
+        character = character or Database.db.characters[characterKey]
+        local dayCharacter = ensureDayCharacter(day, characterKey, character)
         day.sessionCount = (day.sessionCount or 0) + 1
+        dayCharacter.sessionCount = (dayCharacter.sessionCount or 0) + 1
         AW.runtime.lastDayKey = dayKey
     end
 end
@@ -467,13 +483,16 @@ function Tracker:RecordZoneVisit()
     end
 
     local day = Database:GetDay()
+    local characterKey, character = Database:TouchCharacter()
+    local dayCharacter = ensureDayCharacter(day, characterKey, character)
     local zoneKey, zoneInfo = getTrackedZoneInfo()
     if not zoneKey or not zoneInfo then
         return
     end
 
     local isNewZoneForDay = not day.zones[zoneKey]
-    if AW.runtime.lastZoneKey == zoneKey and not isNewZoneForDay then
+    local isNewZoneForCharacter = not dayCharacter.zones[zoneKey]
+    if AW.runtime.lastZoneKey == zoneKey and not isNewZoneForDay and not isNewZoneForCharacter then
         return
     end
 
@@ -487,7 +506,18 @@ function Tracker:RecordZoneVisit()
             visits = 0,
         }
     end
+    if isNewZoneForCharacter then
+        dayCharacter.zones[zoneKey] = {
+            instanceID = zoneInfo.instanceID,
+            instanceType = zoneInfo.instanceType,
+            mapID = zoneInfo.mapID,
+            name = zoneInfo.name,
+            seconds = 0,
+            visits = 0,
+        }
+    end
     day.zones[zoneKey].visits = (day.zones[zoneKey].visits or 0) + 1
+    dayCharacter.zones[zoneKey].visits = (dayCharacter.zones[zoneKey].visits or 0) + 1
     AW.runtime.lastZoneKey = zoneKey
 end
 
@@ -639,6 +669,8 @@ function Tracker:RecordNPCInteraction(service)
     end
 
     local day = Database:GetDay()
+    local characterKey, character = Database:TouchCharacter()
+    local dayCharacter = ensureDayCharacter(day, characterKey, character)
     local key = string.format("%s:%s", tostring(mapID or 0), name)
 
     if not day.npcs[key] then
@@ -679,6 +711,7 @@ function Tracker:RecordNPCInteraction(service)
     local now = GetTime()
     if AW.runtime.lastNPC ~= key or (now - AW.runtime.lastNPCAt) >= 5 then
         npc.interactions = (npc.interactions or 0) + 1
+        dayCharacter.npcs[key] = (tonumber(dayCharacter.npcs[key]) or 0) + 1
         AW.runtime.lastNPC = key
         AW.runtime.lastNPCAt = now
     end
@@ -840,6 +873,8 @@ function Tracker:RecordCompletedActivity(activityKey, activity)
 
     local now = Util:Now()
     local day = Database:GetDay(now)
+    local characterKey, character = Database:TouchCharacter(now)
+    ensureDayCharacter(day, characterKey, character)
     local completed = day.completedActivities
     local category = activity.category == "raid" and "raid"
         or activity.category == "dungeon" and "dungeon"
@@ -872,6 +907,7 @@ function Tracker:RecordCompletedActivity(activityKey, activity)
     completed.history = history
     local historyEntry = {
         activityKey = activityKey,
+        characterKey = characterKey,
         category = category,
         completions = 1,
         completedAt = now,
@@ -1460,7 +1496,7 @@ function Tracker:RecordEncounter(encounterID, encounterName, difficultyID, group
     AW.runtime.lastEncounterAt = elapsed
 end
 
-function Tracker:AccumulateGroupmates(day, delta)
+function Tracker:AccumulateGroupmates(day, dayCharacter, delta)
     if not Database.db.settings.trackGroupmates or not IsInGroup() then
         return
     end
@@ -1560,6 +1596,7 @@ function Tracker:AccumulateGroupmates(day, delta)
                     groupmate.profileUpdatedAt = now
                 end
                 groupmate.seconds = groupmate.seconds + delta
+                dayCharacter.groupmates[key] = (tonumber(dayCharacter.groupmates[key]) or 0) + delta
             end
         end
     end
@@ -1576,7 +1613,7 @@ function Tracker:Accumulate(delta)
     local dayCharacter = ensureDayCharacter(day, characterKey, character)
     local isAFK = getPlayerAFKState()
 
-    self:MarkSessionForDay(day, dayKey)
+    self:MarkSessionForDay(day, dayKey, characterKey, character)
 
     day.onlineSeconds = (day.onlineSeconds or 0) + delta
     dayCharacter.seconds = (dayCharacter.seconds or 0) + delta
@@ -1592,6 +1629,7 @@ function Tracker:Accumulate(delta)
     local zoneKey, zoneInfo = getTrackedZoneInfo()
     if zoneKey and zoneInfo then
         local isNewZoneForDay = not day.zones[zoneKey]
+        local isNewZoneForCharacter = not dayCharacter.zones[zoneKey]
         if isNewZoneForDay then
             day.zones[zoneKey] = {
                 instanceID = zoneInfo.instanceID,
@@ -1602,21 +1640,36 @@ function Tracker:Accumulate(delta)
                 visits = 0,
             }
         end
-        if isNewZoneForDay or AW.runtime.lastZoneKey ~= zoneKey then
+        if isNewZoneForCharacter then
+            dayCharacter.zones[zoneKey] = {
+                instanceID = zoneInfo.instanceID,
+                instanceType = zoneInfo.instanceType,
+                mapID = zoneInfo.mapID,
+                name = zoneInfo.name,
+                seconds = 0,
+                visits = 0,
+            }
+        end
+        local changedZone = isNewZoneForDay or isNewZoneForCharacter or AW.runtime.lastZoneKey ~= zoneKey
+        if changedZone then
             day.zones[zoneKey].visits = (day.zones[zoneKey].visits or 0) + 1
+            dayCharacter.zones[zoneKey].visits = (dayCharacter.zones[zoneKey].visits or 0) + 1
             AW.runtime.lastZoneKey = zoneKey
         end
         day.zones[zoneKey].seconds = day.zones[zoneKey].seconds + delta
+        dayCharacter.zones[zoneKey].seconds = dayCharacter.zones[zoneKey].seconds + delta
     end
 
     local activity = getActivity()
     day.activities[activity] = (day.activities[activity] or 0) + delta
+    dayCharacter.activities[activity] = (dayCharacter.activities[activity] or 0) + delta
 
-    self:AccumulateGroupmates(day, delta)
+    self:AccumulateGroupmates(day, dayCharacter, delta)
 
     if AW.runtime.session then
         local sessionDuration = math.max(0, now - AW.runtime.session.startedAt)
         day.longestSession = math.max(day.longestSession or 0, sessionDuration)
+        dayCharacter.longestSession = math.max(dayCharacter.longestSession or 0, sessionDuration)
     end
 
     Database.db.meta.updatedAt = now
@@ -1676,7 +1729,8 @@ function Tracker:OnPlayerLogin()
     Database:StartSession()
 
     local day, dayKey = Database:GetDay()
-    self:MarkSessionForDay(day, dayKey)
+    local characterKey, character = Database:TouchCharacter()
+    self:MarkSessionForDay(day, dayKey, characterKey, character)
     self:RecordMoneyBaseline()
     self:RecordZoneVisit()
     self:UpdateActivePreyQuest()

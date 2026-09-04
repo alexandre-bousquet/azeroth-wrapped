@@ -8,6 +8,7 @@ AW.UI = {
     companionSearchText = "",
     characterSearchText = "",
     activityFilter = "all",
+    characterFilter = nil,
     cards = {},
     periodButtons = {},
 }
@@ -37,8 +38,293 @@ local CARD_DEFINITIONS = {
     { key = "activities", titleKey = "CARD_ACTIVITIES", icon = "Interface/Icons/Achievement_Boss_LichKing", accent = Theme.danger },
 }
 
+local CARD_DEFINITIONS_BY_KEY = {}
+local DEFAULT_CARD_ORDER = {}
+for _, definition in ipairs(CARD_DEFINITIONS) do
+    CARD_DEFINITIONS_BY_KEY[definition.key] = definition
+    DEFAULT_CARD_ORDER[#DEFAULT_CARD_ORDER + 1] = definition.key
+end
+
+UI.cardDefinitions = CARD_DEFINITIONS_BY_KEY
+UI.defaultCardOrder = DEFAULT_CARD_ORDER
+
 local function setText(fontString, value)
     Theme:SetText(fontString, value)
+end
+
+local function getCardSettings()
+    local database = AW.Database and AW.Database.db
+    return database and database.settings or nil
+end
+
+function UI:NormalizeCardSettings()
+    local settings = getCardSettings()
+    if not settings then
+        return DEFAULT_CARD_ORDER, {}
+    end
+
+    local order = {}
+    local seen = {}
+    if type(settings.cardOrder) == "table" then
+        for _, cardKey in ipairs(settings.cardOrder) do
+            if CARD_DEFINITIONS_BY_KEY[cardKey] and not seen[cardKey] then
+                seen[cardKey] = true
+                order[#order + 1] = cardKey
+            end
+        end
+    end
+    for _, cardKey in ipairs(DEFAULT_CARD_ORDER) do
+        if not seen[cardKey] then
+            order[#order + 1] = cardKey
+        end
+    end
+
+    local hidden = {}
+    if type(settings.hiddenCards) == "table" then
+        for cardKey, isHidden in pairs(settings.hiddenCards) do
+            if isHidden and CARD_DEFINITIONS_BY_KEY[cardKey] then
+                hidden[cardKey] = true
+            end
+        end
+    end
+
+    settings.cardOrder = order
+    settings.hiddenCards = hidden
+    return order, hidden
+end
+
+function UI:GetCardOrder()
+    return self:NormalizeCardSettings()
+end
+
+function UI:IsCardEnabled(cardKey)
+    local _, hidden = self:NormalizeCardSettings()
+    return CARD_DEFINITIONS_BY_KEY[cardKey] ~= nil and not hidden[cardKey]
+end
+
+function UI:SetCardEnabled(cardKey, enabled)
+    if not CARD_DEFINITIONS_BY_KEY[cardKey] then
+        return
+    end
+
+    local settings = getCardSettings()
+    if not settings then
+        return
+    end
+    local _, hidden = self:NormalizeCardSettings()
+    if enabled then
+        hidden[cardKey] = nil
+    else
+        hidden[cardKey] = true
+    end
+    settings.hiddenCards = hidden
+    self:ApplyCardLayout()
+end
+
+function UI:ReorderCard(cardKey, targetIndex)
+    local settings = getCardSettings()
+    if not settings or not CARD_DEFINITIONS_BY_KEY[cardKey] then
+        return
+    end
+
+    local order = self:NormalizeCardSettings()
+    local reordered = {}
+    for _, orderedKey in ipairs(order) do
+        if orderedKey ~= cardKey then
+            reordered[#reordered + 1] = orderedKey
+        end
+    end
+
+    targetIndex = math.max(1, math.min(tonumber(targetIndex) or 1, #reordered + 1))
+    table.insert(reordered, targetIndex, cardKey)
+
+    settings.cardOrder = reordered
+    self:ApplyCardLayout()
+end
+
+function UI:ApplyCardLayout()
+    if not self.frame then
+        return
+    end
+
+    local order, hidden = self:NormalizeCardSettings()
+    local visibleIndex = 0
+    for _, cardKey in ipairs(order) do
+        local card = self.cards[cardKey]
+        if card then
+            card:ClearAllPoints()
+            if self.detailKey or hidden[cardKey] then
+                card:Hide()
+            else
+                local column = visibleIndex % 2
+                local row = math.floor(visibleIndex / 2)
+                card:SetPoint("TOPLEFT", 28 + (column * 438), -158 - (row * 144))
+                card:Show()
+                visibleIndex = visibleIndex + 1
+            end
+        end
+    end
+end
+
+local function getCharacterFilterSettings()
+    local database = AW.Database and AW.Database.db
+    return database and database.settings or nil
+end
+
+function UI:LoadCharacterFilter()
+    local settings = getCharacterFilterSettings()
+    if self.characterFilterSettings == settings then
+        return
+    end
+
+    self.characterFilterSettings = settings
+    self.characterFilter = settings and settings.characterFilter or nil
+end
+
+function UI:SetCharacterFilter(characterFilter)
+    local settings = getCharacterFilterSettings()
+    self.characterFilterSettings = settings
+    self.characterFilter = characterFilter
+    if settings then
+        settings.characterFilter = characterFilter
+    end
+end
+
+function UI:GetCharacterChoices()
+    local choices = {}
+    for characterKey, character in pairs((AW.Database.db and AW.Database.db.characters) or {}) do
+        choices[#choices + 1] = {
+            key = characterKey,
+            name = character.name or L.UNKNOWN_PLAYER,
+            realm = character.realm or "",
+            classFile = character.classFile,
+        }
+    end
+
+    table.sort(choices, function(left, right)
+        local leftName = string.lower(string.format("%s-%s", left.name, left.realm))
+        local rightName = string.lower(string.format("%s-%s", right.name, right.realm))
+        return leftName < rightName
+    end)
+    return choices
+end
+
+function UI:NormalizeCharacterFilter()
+    self:LoadCharacterFilter()
+    if type(self.characterFilter) ~= "table" then
+        self:SetCharacterFilter(nil)
+        return
+    end
+
+    local choices = self:GetCharacterChoices()
+    local selected = 0
+    local normalized = {}
+    for _, choice in ipairs(choices) do
+        if self.characterFilter[choice.key] then
+            selected = selected + 1
+            normalized[choice.key] = true
+        end
+    end
+
+    if selected == 0 or selected == #choices then
+        self:SetCharacterFilter(nil)
+    else
+        self:SetCharacterFilter(normalized)
+    end
+end
+
+function UI:IsCharacterSelected(characterKey)
+    return type(self.characterFilter) ~= "table" or self.characterFilter[characterKey] == true
+end
+
+function UI:GetCharacterFilterLabel(ignorePreview)
+    self:LoadCharacterFilter()
+    if self.previewMode and not ignorePreview then
+        return L.CHARACTER_FILTER_PREVIEW
+    end
+
+    local choices = self:GetCharacterChoices()
+    if type(self.characterFilter) ~= "table" then
+        return L.CHARACTER_FILTER_ALL
+    end
+
+    local count = 0
+    local selectedName
+    for _, choice in ipairs(choices) do
+        if self.characterFilter[choice.key] then
+            count = count + 1
+            selectedName = choice.name
+        end
+    end
+
+    if count == 1 then
+        return selectedName or L.UNKNOWN_PLAYER
+    end
+    return string.format(L.CHARACTER_FILTER_COUNT, count)
+end
+
+function UI:ToggleCharacterFilter(characterKey)
+    self:LoadCharacterFilter()
+    local choices = self:GetCharacterChoices()
+    if type(self.characterFilter) ~= "table" then
+        local selectedCharacters = {}
+        for _, choice in ipairs(choices) do
+            selectedCharacters[choice.key] = true
+        end
+        self:SetCharacterFilter(selectedCharacters)
+    end
+
+    if self.characterFilter[characterKey] then
+        local selected = 0
+        for _, choice in ipairs(choices) do
+            if self.characterFilter[choice.key] then
+                selected = selected + 1
+            end
+        end
+        if selected <= 1 then
+            return
+        end
+        self.characterFilter[characterKey] = nil
+    else
+        self.characterFilter[characterKey] = true
+    end
+
+    self:NormalizeCharacterFilter()
+    self.previewMode = false
+    self:Refresh(true)
+    if AW.Options and AW.Options.Refresh then
+        AW.Options:Refresh()
+    end
+end
+
+function UI:SetupCharacterDropdown(dropdown, width)
+    dropdown:SetWidth(width or 240)
+    dropdown:SetDefaultText(self:GetCharacterFilterLabel(true))
+    dropdown:SetSelectionText(function()
+        return UI:GetCharacterFilterLabel(true)
+    end)
+    dropdown:SetupMenu(function(_, rootDescription)
+        rootDescription:CreateButton(L.CHARACTER_FILTER_ALL, function()
+            UI:SetCharacterFilter(nil)
+            UI.previewMode = false
+            UI:Refresh(true)
+            if AW.Options and AW.Options.Refresh then
+                AW.Options:Refresh()
+            end
+        end)
+        rootDescription:CreateDivider()
+
+        for _, choice in ipairs(UI:GetCharacterChoices()) do
+            local characterKey = choice.key
+            local label = choice.realm ~= "" and string.format(L.CHARACTER_FILTER_NAME_REALM, choice.name, choice.realm)
+                or choice.name
+            rootDescription:CreateCheckbox(label, function()
+                return UI:IsCharacterSelected(characterKey)
+            end, function()
+                UI:ToggleCharacterFilter(characterKey)
+            end)
+        end
+    end)
 end
 
 local function getMinimapSettings()
@@ -77,11 +363,14 @@ function UI:CreateMinimapButton()
         OnClick = function(_, button)
             if button == "LeftButton" then
                 UI:Toggle()
+            elseif button == "RightButton" and AW.Options and AW.Options.Open then
+                AW.Options:Open()
             end
         end,
         OnTooltipShow = function(tooltip)
             tooltip:AddLine(AW.displayName)
             tooltip:AddLine(L.MINIMAP_TOOLTIP, 1, 1, 1, true)
+            tooltip:AddLine(L.MINIMAP_TOOLTIP_RIGHT, 1, 1, 1, true)
         end,
     })
 
@@ -106,9 +395,6 @@ function UI:CreateCard(parent, definition, index)
     card:RegisterForClicks("LeftButtonUp")
     card.definition = definition
 
-    local column = (index - 1) % 2
-    local row = math.floor((index - 1) / 2)
-    card:SetPoint("TOPLEFT", 28 + (column * 438), -158 - (row * 144))
     Theme:ApplyBackdrop(card)
 
     card.accent = card:CreateTexture(nil, "ARTWORK")
@@ -262,6 +548,7 @@ function UI:CreateFrame()
 
     frame:Hide()
     self.frame = frame
+    self:ApplyCardLayout()
     return frame
 end
 
@@ -384,10 +671,13 @@ function UI:Refresh(resetDetailScroll)
         self.previewMode = false
     end
 
-    local summary = self.previewMode and AW.Summary:BuildPreview() or AW.Summary:Build(self.periodKey)
+    self:NormalizeCharacterFilter()
+    local summary = self.previewMode and AW.Summary:BuildPreview()
+        or AW.Summary:Build(self.periodKey, self.characterFilter)
     self.currentSummary = summary
     self:UpdateButtons()
     self:UpdateCards(summary)
+    self:ApplyCardLayout()
 
     if self.detailKey then
         self:RefreshDetails(summary, resetDetailScroll)

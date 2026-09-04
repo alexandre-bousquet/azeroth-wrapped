@@ -18,6 +18,7 @@ local function newDatabase(now)
             createdAt = now,
             updatedAt = now,
             lastLoginAt = now,
+            characterBreakdownsStartedAt = now,
             seasons = {},
         },
         settings = {
@@ -25,6 +26,8 @@ local function newDatabase(now)
             debug = false,
             locale = "AUTO",
             defaultPeriod = "WEEK",
+            cardOrder = { "time", "world", "fate", "companion", "identity", "npcs", "gold", "activities" },
+            hiddenCards = {},
             trackAFK = true,
             trackGroupmates = true,
             trackNPCs = true,
@@ -208,6 +211,66 @@ local function removeSummonedNPCPositions(savedDatabase)
     end
 end
 
+local function ensureCharacterBreakdown(dayCharacter)
+    dayCharacter.sessionCount = tonumber(dayCharacter.sessionCount) or 0
+    dayCharacter.longestSession = tonumber(dayCharacter.longestSession) or 0
+    ensureTable(dayCharacter, "zones")
+    ensureTable(dayCharacter, "activities")
+    ensureTable(dayCharacter, "groupmates")
+    ensureTable(dayCharacter, "npcs")
+end
+
+local function migrateCharacterBreakdowns(savedDatabase)
+    for _, day in pairs(savedDatabase.days or {}) do
+        local onlyCharacterKey
+        local characterCount = 0
+        for characterKey, dayCharacter in pairs(day.characters or {}) do
+            if type(dayCharacter) == "table" then
+                ensureCharacterBreakdown(dayCharacter)
+                onlyCharacterKey = characterKey
+                characterCount = characterCount + 1
+            end
+        end
+
+        if characterCount == 1 then
+            local dayCharacter = day.characters[onlyCharacterKey]
+            dayCharacter.sessionCount = tonumber(day.sessionCount) or dayCharacter.sessionCount
+            dayCharacter.longestSession = tonumber(day.longestSession) or dayCharacter.longestSession
+
+            for activity, seconds in pairs(day.activities or {}) do
+                dayCharacter.activities[activity] = tonumber(seconds) or 0
+            end
+            for zoneKey, zone in pairs(day.zones or {}) do
+                if type(zone) == "table" then
+                    dayCharacter.zones[zoneKey] = {
+                        instanceID = zone.instanceID,
+                        instanceType = zone.instanceType,
+                        mapID = zone.mapID,
+                        name = zone.name,
+                        seconds = tonumber(zone.seconds) or 0,
+                        visits = tonumber(zone.visits) or 0,
+                    }
+                end
+            end
+            for groupmateKey, groupmate in pairs(day.groupmates or {}) do
+                if type(groupmate) == "table" then
+                    dayCharacter.groupmates[groupmateKey] = tonumber(groupmate.seconds) or 0
+                end
+            end
+            for npcKey, npc in pairs(day.npcs or {}) do
+                if type(npc) == "table" then
+                    dayCharacter.npcs[npcKey] = tonumber(npc.interactions) or 0
+                end
+            end
+            for _, activity in ipairs((day.completedActivities and day.completedActivities.history) or {}) do
+                if type(activity) == "table" and not activity.characterKey then
+                    activity.characterKey = onlyCharacterKey
+                end
+            end
+        end
+    end
+end
+
 function Database:Initialize()
     local now = Util:Now()
     local savedVariableName = AW.savedVariableName or "AzerothWrappedDB"
@@ -274,6 +337,9 @@ function Database:Initialize()
     end
     if previousSchema < 10 then
         removeSummonedNPCPositions(savedDatabase)
+    end
+    if previousSchema < 11 then
+        migrateCharacterBreakdowns(savedDatabase)
     end
 
     savedDatabase.schema = AW.CONST.DB_SCHEMA
@@ -424,10 +490,7 @@ function Database:CountDays()
     return Util:Count(self.db and self.db.days or {})
 end
 
-function Database:Reset()
-    local savedVariableName = AW.savedVariableName or "AzerothWrappedDB"
-    _G[savedVariableName] = newDatabase(Util:Now())
-    self.db = _G[savedVariableName]
+local function resetRuntimeState()
     AW.runtime.session = nil
     AW.runtime.lastDayKey = nil
     AW.runtime.lastZoneKey = nil
@@ -448,4 +511,46 @@ function Database:Reset()
     AW.runtime.activeDelve = nil
     AW.runtime.activeDungeon = nil
     AW.runtime.lastDungeonCompletionAt = 0
+end
+
+function Database:DeletePeriod(periodKey)
+    periodKey = AW.Periods:IsValid(periodKey) and periodKey or "ALL"
+    local now = Util:Now()
+
+    if periodKey == "ALL" then
+        local savedVariableName = AW.savedVariableName or "AzerothWrappedDB"
+        local settings = self.db.settings
+        local freshDatabase = newDatabase(now)
+        freshDatabase.settings = settings
+        _G[savedVariableName] = freshDatabase
+        self.db = freshDatabase
+    else
+        local startAt, endAt = AW.Periods:GetRange(periodKey, now)
+        for dayKey, day in pairs(self.db.days or {}) do
+            local timestamp = tonumber(day.startedAt) or Util:TimestampFromDayKey(dayKey)
+            if timestamp and timestamp >= startAt and timestamp <= endAt then
+                self.db.days[dayKey] = nil
+            end
+        end
+
+        for index = #(self.db.sessions or {}), 1, -1 do
+            local session = self.db.sessions[index]
+            local sessionStart = tonumber(session and session.startedAt) or 0
+            local sessionEnd = tonumber(session and session.endedAt) or sessionStart
+            if sessionEnd >= startAt and sessionStart <= endAt then
+                table.remove(self.db.sessions, index)
+            end
+        end
+
+        self.db.meta.updatedAt = now
+    end
+
+    resetRuntimeState()
+end
+
+function Database:Reset()
+    local savedVariableName = AW.savedVariableName or "AzerothWrappedDB"
+    _G[savedVariableName] = newDatabase(Util:Now())
+    self.db = _G[savedVariableName]
+    resetRuntimeState()
 end

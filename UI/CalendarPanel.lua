@@ -134,6 +134,10 @@ local function formatActivityDetail(activity, displayName)
     local kindLabel = L["DETAIL_ACTIVITY_KIND_" .. (activity.kind or "other")]
     local difficultyLabel = activity.difficultyName
     local timerLabel
+    local character = activity.characterKey
+        and AW.Database.db.characters
+        and AW.Database.db.characters[activity.characterKey]
+    local characterLabel = character and string.format(L.ACTIVITY_CHARACTER, character.name or L.UNKNOWN_PLAYER)
     local runSeconds = tonumber(activity.runSeconds)
 
     if category == "dungeon" then
@@ -152,7 +156,15 @@ local function formatActivityDetail(activity, displayName)
         timerLabel = string.format(L.DETAIL_ACTIVITY_TIMER, Util:FormatTimer(runSeconds))
     end
 
-    return joinUniqueDetails(displayName, categoryLabel, kindLabel, difficultyLabel, timerLabel, activity.instanceName)
+    return joinUniqueDetails(
+        displayName,
+        categoryLabel,
+        kindLabel,
+        difficultyLabel,
+        timerLabel,
+        activity.instanceName,
+        characterLabel
+    )
 end
 
 local function formatActivityValue(activity)
@@ -489,7 +501,7 @@ function UI:RefreshCalendar(summary)
     end
 
     local timeline = self.previewMode and AW.Summary:BuildPreviewTimeline()
-        or AW.Summary:BuildTimeline(self.periodKey)
+        or AW.Summary:BuildTimeline(self.periodKey, self.characterFilter)
     view.timeline = timeline
     summary = summary or self.currentSummary or {}
     Theme:SetText(view.periodStats, joinDetails(

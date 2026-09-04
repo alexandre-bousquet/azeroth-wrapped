@@ -6,20 +6,22 @@ StaticPopupDialogs["AZEROTH_WRAPPED_RESET"] = {
     text = L.RESET_CONFIRM,
     button1 = YES,
     button2 = NO,
-    OnAccept = function()
-        AW.Database:Reset()
+    OnAccept = function(_, data)
+        local periodKey = data and data.periodKey or "ALL"
+        AW.Database:DeletePeriod(periodKey)
         AW.Periods:RefreshSeason()
-        if AW.UI and AW.UI.ApplyDefaultPeriod then
-            AW.UI:ApplyDefaultPeriod()
-        end
         AW.Database:StartSession()
         local day, dayKey = AW.Database:GetDay()
         AW.Tracker:MarkSessionForDay(day, dayKey)
         AW.Tracker:RecordMoneyBaseline()
+        AW.Tracker:RecordZoneVisit()
         if AW.UI and AW.UI.RefreshMinimapButton then
             AW.UI:RefreshMinimapButton()
         end
-        AW:Print(L.RESET_DONE)
+        if AW.UI and AW.UI.NormalizeCharacterFilter then
+            AW.UI:NormalizeCharacterFilter()
+        end
+        AW:Print(string.format(L.RESET_DONE, AW.Periods:GetResetLabel(periodKey)))
         if AW.UI and AW.UI.frame and AW.UI.frame:IsShown() then
             AW.UI:Refresh()
         end
@@ -33,8 +35,14 @@ StaticPopupDialogs["AZEROTH_WRAPPED_RESET"] = {
     preferredIndex = 3,
 }
 
-function AW:ShowResetConfirmation()
-    StaticPopup_Show("AZEROTH_WRAPPED_RESET")
+function AW:ShowResetConfirmation(periodKey)
+    periodKey = AW.Periods:IsValid(periodKey) and periodKey or "ALL"
+    StaticPopup_Show(
+        "AZEROTH_WRAPPED_RESET",
+        AW.Periods:GetResetLabel(periodKey),
+        nil,
+        { periodKey = periodKey }
+    )
 end
 
 local function normalize(message)

@@ -89,3 +89,10 @@ function Periods:GetLabel(periodKey)
 
     return periodKey
 end
+
+function Periods:GetResetLabel(periodKey)
+    if periodKey == "ALL" then
+        return AW.L.RESET_PERIOD_ALL
+    end
+    return self:GetLabel(periodKey)
+end

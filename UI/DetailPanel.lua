@@ -599,6 +599,16 @@ local function buildActivityRows(summary)
                 detail = joinDetails(categoryLabel, kindLabel, activity.instanceName, activity.difficultyName)
             end
 
+            local activityCharacter = activity.characterKey
+                and AW.Database.db.characters
+                and AW.Database.db.characters[activity.characterKey]
+            if activityCharacter then
+                detail = joinDetails(detail, string.format(
+                    L.ACTIVITY_CHARACTER,
+                    activityCharacter.name or L.UNKNOWN_PLAYER
+                ))
+            end
+
             local completionCount = tonumber(activity.completions) or 0
             local isSingleLegacyCompletion = activity.legacyAggregate and completionCount == 1
             local completionLabel = activity.completedAt
@@ -933,7 +943,12 @@ function UI:RefreshDetails(summary, resetScroll)
     panel.icon:SetTexture(card.definition.icon)
 
     local periodLabel = self.previewMode and L.PREVIEW or AW.Periods:GetLabel(self.periodKey)
-    panel.subtitle:SetText(string.format("%s  •  %s", periodLabel, L.DETAIL_SUBTITLE))
+    panel.subtitle:SetText(string.format(
+        "%s  •  %s  •  %s",
+        periodLabel,
+        self:GetCharacterFilterLabel(),
+        L.DETAIL_SUBTITLE
+    ))
 
     panel.scroll:SetShown(not hasCalendar)
     if panel.calendarView then
@@ -1097,7 +1112,5 @@ function UI:CloseDetails()
     if GameTooltip then
         GameTooltip:Hide()
     end
-    for _, summaryCard in pairs(self.cards) do
-        summaryCard:Show()
-    end
+    self:ApplyCardLayout()
 end

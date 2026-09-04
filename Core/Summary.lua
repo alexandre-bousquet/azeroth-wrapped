@@ -17,7 +17,16 @@ local NUMERIC_FIELDS = {
     earned = true,
     spent = true,
     changes = true,
+    sessionCount = true,
 }
+
+local function hasCharacterFilter(characterFilter)
+    return type(characterFilter) == "table"
+end
+
+local function includesCharacter(characterFilter, characterKey)
+    return not hasCharacterFilter(characterFilter) or characterFilter[characterKey] == true
+end
 
 local function mergeStructured(target, source)
     for key, value in pairs(source or {}) do
@@ -218,6 +227,62 @@ local function mergeNPCs(target, source)
     end
 end
 
+local function mergeCharacterGroupmates(target, metadata, counters)
+    for key, seconds in pairs(counters or {}) do
+        local groupmate = type(metadata and metadata[key]) == "table" and metadata[key] or {}
+        local source = {}
+        for field, value in pairs(groupmate) do
+            source[field] = value
+        end
+        source.seconds = tonumber(seconds) or 0
+        mergeGroupmates(target, { [key] = source })
+    end
+end
+
+local function mergeCharacterNPCs(target, metadata, counters)
+    for key, interactions in pairs(counters or {}) do
+        local npc = type(metadata and metadata[key]) == "table" and metadata[key] or {}
+        local source = {}
+        for field, value in pairs(npc) do
+            source[field] = value
+        end
+        source.interactions = tonumber(interactions) or 0
+        mergeNPCs(target, { [key] = source })
+    end
+end
+
+local function mergeFilteredCompletedActivity(result, activity)
+    local completions = math.max(1, tonumber(activity.completions) or 1)
+    local category = activity.category == "raid" and "raid"
+        or activity.category == "dungeon" and "dungeon"
+        or "outdoor"
+    local activityKey = activity.activityKey
+        or string.format("%s:%s:%s", category, tostring(activity.kind or "other"), tostring(activity.name or "unknown"))
+    local snapshot = {}
+    for field, value in pairs(activity) do
+        snapshot[field] = value
+    end
+    snapshot.category = category
+    snapshot.completions = completions
+    snapshot.lastCompletedAt = snapshot.lastCompletedAt or snapshot.completedAt
+
+    result.completedActivities.total = result.completedActivities.total + completions
+    result.completedActivities[category] = result.completedActivities[category] + completions
+    mergeCompletedActivities(result.completedActivities.entries, { [activityKey] = snapshot })
+    mergeActivityHistory(result.completedActivities.history, { activity })
+
+    if category == "raid" and activity.kind == "boss" then
+        result.encounters.total = result.encounters.total + completions
+        result.encounters.raid = result.encounters.raid + completions
+        local boss = {}
+        for field, value in pairs(activity) do
+            boss[field] = value
+        end
+        boss.kills = completions
+        mergeStructured(result.encounters.bosses, { [activityKey] = boss })
+    end
+end
+
 local function getTimeCounters(container, totalField)
     container = type(container) == "table" and container or {}
     local total = math.max(0, tonumber(container[totalField]) or 0)
@@ -270,15 +335,58 @@ local function copyActivity(activity)
     return snapshot
 end
 
-local function buildTimelineDay(dayKey, timestamp, day)
+local function buildTimelineDay(dayKey, timestamp, day, characterFilter)
     day = type(day) == "table" and day or {}
-    local onlineSeconds, activeSeconds, afkSeconds = getTimeCounters(day, "onlineSeconds")
+    local filtered = hasCharacterFilter(characterFilter)
+    local onlineSeconds, activeSeconds, afkSeconds
+    local sessionCount = 0
+    local deaths = 0
+    local activities = {}
+    local topCharacter
+    local topCharacterSeconds = -1
+
+    if filtered then
+        onlineSeconds, activeSeconds, afkSeconds = 0, 0, 0
+        for characterKey, character in pairs(day.characters or {}) do
+            if includesCharacter(characterFilter, characterKey) then
+                local characterOnline, characterActive, characterAFK = getTimeCounters(character, "seconds")
+                onlineSeconds = onlineSeconds + characterOnline
+                activeSeconds = activeSeconds + characterActive
+                afkSeconds = afkSeconds + characterAFK
+                sessionCount = sessionCount + (tonumber(character.sessionCount) or 0)
+                deaths = deaths + (tonumber(character.deaths) or 0)
+
+                for activity, seconds in pairs(character.activities or {}) do
+                    Util:AddMetric(activities, activity, seconds)
+                end
+
+                if characterOnline > topCharacterSeconds then
+                    topCharacter = character
+                    topCharacterSeconds = characterOnline
+                end
+            end
+        end
+    else
+        onlineSeconds, activeSeconds, afkSeconds = getTimeCounters(day, "onlineSeconds")
+        sessionCount = tonumber(day.sessionCount) or 0
+        deaths = tonumber(day.deaths and day.deaths.total) or 0
+        activities = day.activities or {}
+
+        for _, character in pairs(day.characters or {}) do
+            local seconds = tonumber(character.seconds) or 0
+            if seconds > topCharacterSeconds then
+                topCharacter = character
+                topCharacterSeconds = seconds
+            end
+        end
+    end
+
     local completed = type(day.completedActivities) == "table" and day.completedActivities or {}
     local activityHistory = {}
     local activityCounts = { dungeon = 0, raid = 0, outdoor = 0 }
 
     for _, activity in ipairs(completed.history or {}) do
-        if type(activity) == "table" then
+        if type(activity) == "table" and includesCharacter(characterFilter, activity.characterKey) then
             local snapshot = copyActivity(activity)
             activityHistory[#activityHistory + 1] = snapshot
             local category = snapshot.category == "raid" and "raid"
@@ -288,7 +396,7 @@ local function buildTimelineDay(dayKey, timestamp, day)
         end
     end
 
-    if #activityHistory == 0 then
+    if not filtered and #activityHistory == 0 then
         for activityKey, activity in pairs(completed.entries or {}) do
             if type(activity) == "table" then
                 local snapshot = copyActivity(activity)
@@ -313,18 +421,8 @@ local function buildTimelineDay(dayKey, timestamp, day)
         return leftTime < rightTime
     end)
 
-    local topCharacter
-    local topCharacterSeconds = -1
-    for _, character in pairs(day.characters or {}) do
-        local seconds = tonumber(character.seconds) or 0
-        if seconds > topCharacterSeconds then
-            topCharacter = character
-            topCharacterSeconds = seconds
-        end
-    end
-
-    local totalActivities = tonumber(completed.total) or 0
-    if totalActivities <= 0 then
+    local totalActivities = filtered and 0 or (tonumber(completed.total) or 0)
+    if filtered or totalActivities <= 0 then
         totalActivities = activityCounts.dungeon + activityCounts.raid + activityCounts.outdoor
     end
 
@@ -335,17 +433,17 @@ local function buildTimelineDay(dayKey, timestamp, day)
         onlineSeconds = onlineSeconds,
         activeSeconds = activeSeconds,
         afkSeconds = afkSeconds,
-        sessionCount = tonumber(day.sessionCount) or 0,
-        deaths = tonumber(day.deaths and day.deaths.total) or 0,
+        sessionCount = sessionCount,
+        deaths = deaths,
         completedActivityCount = totalActivities,
         completedActivities = activityHistory,
         activityCounts = activityCounts,
-        activities = day.activities or {},
+        activities = activities,
         topCharacter = topCharacter,
     }
 end
 
-function Summary:BuildTimeline(periodKey)
+function Summary:BuildTimeline(periodKey, characterFilter)
     local startAt, endAt = AW.Periods:GetRange(periodKey)
     startAt = getTimelineStart(periodKey, startAt, endAt)
 
@@ -363,7 +461,7 @@ function Summary:BuildTimeline(periodKey)
 
     while cursor and endDay and cursor <= endDay do
         local dayKey = Util:DayKey(cursor)
-        local day = buildTimelineDay(dayKey, cursor, AW.Database.db.days[dayKey])
+        local day = buildTimelineDay(dayKey, cursor, AW.Database.db.days[dayKey], characterFilter)
         day.isToday = dayKey == todayKey
         timeline.days[#timeline.days + 1] = day
         timeline.daysByKey[dayKey] = day
@@ -374,7 +472,7 @@ function Summary:BuildTimeline(periodKey)
     return timeline
 end
 
-function Summary:BuildMoneyTimeline(periodKey, knownBalance)
+function Summary:BuildMoneyTimeline(periodKey, knownBalance, characterFilter)
     local startAt, endAt = AW.Periods:GetRange(periodKey)
     startAt = getTimelineStart(periodKey, startAt, endAt)
 
@@ -388,13 +486,25 @@ function Summary:BuildMoneyTimeline(periodKey, knownBalance)
         local storedDay = AW.Database.db.days[dayKey]
         local money = type(storedDay) == "table" and type(storedDay.money) == "table"
             and storedDay.money or {}
-        local net = tonumber(money.net) or 0
+        local net = 0
+        local changes = 0
+        if hasCharacterFilter(characterFilter) then
+            for characterKey, wallet in pairs(money.characters or {}) do
+                if includesCharacter(characterFilter, characterKey) then
+                    net = net + (tonumber(wallet.net) or 0)
+                    changes = changes + (tonumber(wallet.changes) or 0)
+                end
+            end
+        else
+            net = tonumber(money.net) or 0
+            changes = tonumber(money.changes) or 0
+        end
 
         days[#days + 1] = {
             key = dayKey,
             timestamp = cursor,
             net = net,
-            changes = tonumber(money.changes) or 0,
+            changes = changes,
         }
         periodNet = periodNet + net
         cursor = nextCalendarDay(cursor)
@@ -502,8 +612,9 @@ function Summary:BuildPreviewTimeline()
     return timeline
 end
 
-function Summary:Build(periodKey)
+function Summary:Build(periodKey, characterFilter)
     local startAt, endAt = AW.Periods:GetRange(periodKey)
+    local filtered = hasCharacterFilter(characterFilter)
     local result = {
         periodKey = periodKey,
         startAt = startAt,
@@ -528,41 +639,120 @@ function Summary:Build(periodKey)
     for dayKey, day in pairs(AW.Database.db.days) do
         local timestamp = day.startedAt or Util:TimestampFromDayKey(dayKey)
         if timestamp and timestamp >= startAt and timestamp <= endAt then
-            local onlineSeconds, activeSeconds, afkSeconds = getTimeCounters(day, "onlineSeconds")
-            result.daysPlayed = result.daysPlayed + 1
-            result.onlineSeconds = result.onlineSeconds + onlineSeconds
-            result.activeSeconds = result.activeSeconds + activeSeconds
-            result.afkSeconds = result.afkSeconds + afkSeconds
-            result.sessionCount = result.sessionCount + (day.sessionCount or 0)
-            result.longestSession = math.max(result.longestSession, day.longestSession or 0)
-            result.deaths.total = result.deaths.total + ((day.deaths and day.deaths.total) or 0)
-            result.money.net = result.money.net + ((day.money and day.money.net) or 0)
-            result.money.earned = result.money.earned + ((day.money and day.money.earned) or 0)
-            result.money.spent = result.money.spent + ((day.money and day.money.spent) or 0)
-            result.money.changes = result.money.changes + ((day.money and day.money.changes) or 0)
-            result.encounters.total = result.encounters.total + ((day.encounters and day.encounters.total) or 0)
-            result.encounters.dungeon = result.encounters.dungeon + ((day.encounters and day.encounters.dungeon) or 0)
-            result.encounters.raid = result.encounters.raid + ((day.encounters and day.encounters.raid) or 0)
-            result.completedActivities.total = result.completedActivities.total + ((day.completedActivities and day.completedActivities.total) or 0)
-            result.completedActivities.dungeon = result.completedActivities.dungeon + ((day.completedActivities and day.completedActivities.dungeon) or 0)
-            result.completedActivities.raid = result.completedActivities.raid + ((day.completedActivities and day.completedActivities.raid) or 0)
-            result.completedActivities.outdoor = result.completedActivities.outdoor + ((day.completedActivities and day.completedActivities.outdoor) or 0)
+            if filtered then
+                local dayHasData = false
 
-            mergeStructured(result.characters, day.characters)
-            mergeZones(result.zones, day.zones)
-            mergeGroupmates(result.groupmates, day.groupmates)
-            mergeNPCs(result.npcs, day.npcs)
-            mergeStructured(result.deaths.locations, day.deaths and day.deaths.locations)
-            for _, death in ipairs((day.deaths and day.deaths.details) or {}) do
-                result.deaths.details[#result.deaths.details + 1] = death
-            end
-            mergeStructured(result.encounters.bosses, day.encounters and day.encounters.bosses)
-            mergeCompletedActivities(result.completedActivities.entries, day.completedActivities and day.completedActivities.entries)
-            mergeActivityHistory(result.completedActivities.history, day.completedActivities and day.completedActivities.history)
-            mergeStructured(result.money.characters, day.money and day.money.characters)
+                for characterKey, dayCharacter in pairs(day.characters or {}) do
+                    if includesCharacter(characterFilter, characterKey) then
+                        local onlineSeconds, activeSeconds, afkSeconds = getTimeCounters(dayCharacter, "seconds")
+                        local sessions = tonumber(dayCharacter.sessionCount) or 0
+                        local characterDeaths = tonumber(dayCharacter.deaths) or 0
 
-            for activity, seconds in pairs(day.activities or {}) do
-                Util:AddMetric(result.activities, activity, seconds)
+                        result.onlineSeconds = result.onlineSeconds + onlineSeconds
+                        result.activeSeconds = result.activeSeconds + activeSeconds
+                        result.afkSeconds = result.afkSeconds + afkSeconds
+                        result.sessionCount = result.sessionCount + sessions
+                        result.longestSession = math.max(result.longestSession, tonumber(dayCharacter.longestSession) or 0)
+                        result.deaths.total = result.deaths.total + characterDeaths
+
+                        mergeStructured(result.characters, { [characterKey] = dayCharacter })
+                        local destinationCharacter = result.characters[characterKey]
+                        destinationCharacter.longestSession = math.max(
+                            tonumber(destinationCharacter.longestSession) or 0,
+                            tonumber(dayCharacter.longestSession) or 0
+                        )
+                        mergeZones(result.zones, dayCharacter.zones)
+                        mergeCharacterGroupmates(result.groupmates, day.groupmates, dayCharacter.groupmates)
+                        mergeCharacterNPCs(result.npcs, day.npcs, dayCharacter.npcs)
+
+                        for activity, seconds in pairs(dayCharacter.activities or {}) do
+                            Util:AddMetric(result.activities, activity, seconds)
+                        end
+
+                        if onlineSeconds > 0 or sessions > 0 or characterDeaths > 0
+                            or next(dayCharacter.activities or {}) ~= nil
+                            or next(dayCharacter.zones or {}) ~= nil
+                            or next(dayCharacter.npcs or {}) ~= nil
+                        then
+                            dayHasData = true
+                        end
+                    end
+                end
+
+                for _, death in ipairs((day.deaths and day.deaths.details) or {}) do
+                    if type(death) == "table" and includesCharacter(characterFilter, death.characterKey) then
+                        result.deaths.details[#result.deaths.details + 1] = death
+                        local locationName = death.locationName or (AW.L and AW.L.UNKNOWN_ZONE) or "Unknown zone"
+                        local locationKey = string.format("%s:%s", tostring(death.mapID or 0), locationName)
+                        local location = result.deaths.locations[locationKey]
+                        if not location then
+                            location = { mapID = death.mapID, name = locationName, deaths = 0 }
+                            result.deaths.locations[locationKey] = location
+                        end
+                        location.deaths = location.deaths + 1
+                    end
+                end
+
+                for characterKey, wallet in pairs((day.money and day.money.characters) or {}) do
+                    if includesCharacter(characterFilter, characterKey) then
+                        result.money.net = result.money.net + (tonumber(wallet.net) or 0)
+                        result.money.earned = result.money.earned + (tonumber(wallet.earned) or 0)
+                        result.money.spent = result.money.spent + (tonumber(wallet.spent) or 0)
+                        result.money.changes = result.money.changes + (tonumber(wallet.changes) or 0)
+                        mergeStructured(result.money.characters, { [characterKey] = wallet })
+                        if (tonumber(wallet.changes) or 0) > 0 then
+                            dayHasData = true
+                        end
+                    end
+                end
+
+                for _, activity in ipairs((day.completedActivities and day.completedActivities.history) or {}) do
+                    if type(activity) == "table" and includesCharacter(characterFilter, activity.characterKey) then
+                        mergeFilteredCompletedActivity(result, activity)
+                        dayHasData = true
+                    end
+                end
+
+                if dayHasData then
+                    result.daysPlayed = result.daysPlayed + 1
+                end
+            else
+                local onlineSeconds, activeSeconds, afkSeconds = getTimeCounters(day, "onlineSeconds")
+                result.daysPlayed = result.daysPlayed + 1
+                result.onlineSeconds = result.onlineSeconds + onlineSeconds
+                result.activeSeconds = result.activeSeconds + activeSeconds
+                result.afkSeconds = result.afkSeconds + afkSeconds
+                result.sessionCount = result.sessionCount + (day.sessionCount or 0)
+                result.longestSession = math.max(result.longestSession, day.longestSession or 0)
+                result.deaths.total = result.deaths.total + ((day.deaths and day.deaths.total) or 0)
+                result.money.net = result.money.net + ((day.money and day.money.net) or 0)
+                result.money.earned = result.money.earned + ((day.money and day.money.earned) or 0)
+                result.money.spent = result.money.spent + ((day.money and day.money.spent) or 0)
+                result.money.changes = result.money.changes + ((day.money and day.money.changes) or 0)
+                result.encounters.total = result.encounters.total + ((day.encounters and day.encounters.total) or 0)
+                result.encounters.dungeon = result.encounters.dungeon + ((day.encounters and day.encounters.dungeon) or 0)
+                result.encounters.raid = result.encounters.raid + ((day.encounters and day.encounters.raid) or 0)
+                result.completedActivities.total = result.completedActivities.total + ((day.completedActivities and day.completedActivities.total) or 0)
+                result.completedActivities.dungeon = result.completedActivities.dungeon + ((day.completedActivities and day.completedActivities.dungeon) or 0)
+                result.completedActivities.raid = result.completedActivities.raid + ((day.completedActivities and day.completedActivities.raid) or 0)
+                result.completedActivities.outdoor = result.completedActivities.outdoor + ((day.completedActivities and day.completedActivities.outdoor) or 0)
+
+                mergeStructured(result.characters, day.characters)
+                mergeZones(result.zones, day.zones)
+                mergeGroupmates(result.groupmates, day.groupmates)
+                mergeNPCs(result.npcs, day.npcs)
+                mergeStructured(result.deaths.locations, day.deaths and day.deaths.locations)
+                for _, death in ipairs((day.deaths and day.deaths.details) or {}) do
+                    result.deaths.details[#result.deaths.details + 1] = death
+                end
+                mergeStructured(result.encounters.bosses, day.encounters and day.encounters.bosses)
+                mergeCompletedActivities(result.completedActivities.entries, day.completedActivities and day.completedActivities.entries)
+                mergeActivityHistory(result.completedActivities.history, day.completedActivities and day.completedActivities.history)
+                mergeStructured(result.money.characters, day.money and day.money.characters)
+
+                for activity, seconds in pairs(day.activities or {}) do
+                    Util:AddMetric(result.activities, activity, seconds)
+                end
             end
         end
     end
@@ -579,8 +769,8 @@ function Summary:Build(periodKey)
 
     local knownBalance = 0
     local trackedWallets = 0
-    for _, character in pairs(AW.Database.db.characters or {}) do
-        if character.moneyCopper ~= nil then
+    for characterKey, character in pairs(AW.Database.db.characters or {}) do
+        if includesCharacter(characterFilter, characterKey) and character.moneyCopper ~= nil then
             knownBalance = knownBalance + (tonumber(character.moneyCopper) or 0)
             trackedWallets = trackedWallets + 1
         end
@@ -605,7 +795,7 @@ function Summary:Build(periodKey)
     result.warbandBalance = tonumber(AW.Database.db.meta.warbandMoneyCopper)
     result.trackedWallets = trackedWallets
     result.hasMoneyData = trackedWallets > 0
-    result.moneyTimeline = self:BuildMoneyTimeline(periodKey, knownBalance)
+    result.moneyTimeline = self:BuildMoneyTimeline(periodKey, knownBalance, characterFilter)
     result.hasEncounterData = result.encounters.total > 0
     result.hasCompletedActivityData = result.completedActivities.total > 0
     result.hasData = result.onlineSeconds > 0
