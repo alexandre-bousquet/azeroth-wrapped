@@ -26,7 +26,7 @@ StaticPopupDialogs[PROFILE_URL_POPUP] = {
 }
 
 local function appendRow(rows, label, detail, value, waypoint, raiderIOURL, warcraftLogsURL, classFile)
-    rows[#rows + 1] = {
+    local row = {
         label = label or L.DETAIL_UNKNOWN,
         detail = detail or "",
         value = value or "",
@@ -35,6 +35,8 @@ local function appendRow(rows, label, detail, value, waypoint, raiderIOURL, warc
         warcraftLogsURL = warcraftLogsURL,
         classFile = classFile,
     }
+    rows[#rows + 1] = row
+    return row
 end
 
 local function urlEncode(value)
@@ -515,6 +517,7 @@ local function buildActivityRows(summary)
     local history = completedActivities.history or {}
     local activities = {}
     local usesHistory = #history > 0
+    local showActivityCharacters = UI:ShouldShowActivityCharacters()
 
     if usesHistory then
         for index, activity in ipairs(history) do
@@ -602,12 +605,6 @@ local function buildActivityRows(summary)
             local activityCharacter = activity.characterKey
                 and AW.Database.db.characters
                 and AW.Database.db.characters[activity.characterKey]
-            if activityCharacter then
-                detail = joinDetails(detail, string.format(
-                    L.ACTIVITY_CHARACTER,
-                    activityCharacter.name or L.UNKNOWN_PLAYER
-                ))
-            end
 
             local completionCount = tonumber(activity.completions) or 0
             local isSingleLegacyCompletion = activity.legacyAggregate and completionCount == 1
@@ -616,12 +613,16 @@ local function buildActivityRows(summary)
                 and date(L.ACTIVITY_DATE_FORMAT, activity.completedAt)
                 or string.format(L.DETAIL_COMPLETIONS, completionCount)
 
-            appendRow(
+            local row = appendRow(
                 rows,
                 displayName,
                 detail,
                 completionLabel
             )
+            if showActivityCharacters and activityCharacter then
+                row.characterName = activityCharacter.name or L.UNKNOWN_PLAYER
+                row.characterClassFile = activityCharacter.classFile
+            end
         end
     end
 
@@ -714,6 +715,12 @@ function UI:CreateDetailRow(parent, index)
     row.value:SetWidth(180)
     row.value:SetJustifyH("RIGHT")
     row.value:SetWordWrap(false)
+
+    row.character = Theme:CreateText(row, "GameFontHighlightSmall", 10, Theme.muted)
+    row.character:SetWidth(180)
+    row.character:SetJustifyH("RIGHT")
+    row.character:SetWordWrap(false)
+    row.character:Hide()
 
     row.waypoint = Theme:CreateButton(row, L.DETAIL_WAYPOINT, 88)
     row.waypoint:SetSize(88, 26)
@@ -994,6 +1001,7 @@ function UI:RefreshDetails(summary, resetScroll)
         Theme:SetText(row.label, rowData.label)
         Theme:SetText(row.detail, rowData.detail)
         Theme:SetText(row.value, rowData.value)
+        Theme:SetText(row.character, rowData.characterName)
         row:SetBackdropBorderColor(unpack(Theme.border))
         local classColor = Util:GetClassColor(rowData.classFile)
         row.label:SetTextColor(unpack(classColor or Theme.text))
@@ -1002,6 +1010,8 @@ function UI:RefreshDetails(summary, resetScroll)
         row.raiderIO:ClearAllPoints()
         row.warcraftLogs:ClearAllPoints()
         row.value:ClearAllPoints()
+        row.character:ClearAllPoints()
+        row.character:Hide()
         row.waypoint:Hide()
         row.raiderIO:Hide()
         row.warcraftLogs:Hide()
@@ -1045,6 +1055,16 @@ function UI:RefreshDetails(summary, resetScroll)
         else
             row.value:SetPoint("RIGHT", -13, 0)
             row.value:SetWidth(180)
+        end
+
+        if rowData.characterName and not previousAction then
+            row.value:ClearAllPoints()
+            row.value:SetPoint("TOPRIGHT", -13, -8)
+            row.value:SetWidth(180)
+            row.character:SetPoint("BOTTOMRIGHT", -13, 8)
+            local characterColor = Util:GetClassColor(rowData.characterClassFile)
+            row.character:SetTextColor(unpack(characterColor or Theme.muted))
+            row.character:Show()
         end
 
         local textRightInset = previousAction and -225 or -205

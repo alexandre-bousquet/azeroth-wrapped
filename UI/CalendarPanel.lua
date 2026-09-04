@@ -134,10 +134,6 @@ local function formatActivityDetail(activity, displayName)
     local kindLabel = L["DETAIL_ACTIVITY_KIND_" .. (activity.kind or "other")]
     local difficultyLabel = activity.difficultyName
     local timerLabel
-    local character = activity.characterKey
-        and AW.Database.db.characters
-        and AW.Database.db.characters[activity.characterKey]
-    local characterLabel = character and string.format(L.ACTIVITY_CHARACTER, character.name or L.UNKNOWN_PLAYER)
     local runSeconds = tonumber(activity.runSeconds)
 
     if category == "dungeon" then
@@ -162,8 +158,7 @@ local function formatActivityDetail(activity, displayName)
         kindLabel,
         difficultyLabel,
         timerLabel,
-        activity.instanceName,
-        characterLabel
+        activity.instanceName
     )
 end
 
@@ -190,20 +185,26 @@ local function createActivityRow(parent, index)
 
     row.label = Theme:CreateText(row, "GameFontHighlight", 12, Theme.text)
     row.label:SetPoint("TOPLEFT", 40, -5)
-    row.label:SetPoint("RIGHT", -92, 0)
+    row.label:SetPoint("RIGHT", -138, 0)
     row.label:SetJustifyH("LEFT")
     row.label:SetWordWrap(false)
 
     row.detail = Theme:CreateText(row, "GameFontHighlightSmall", 9, Theme.muted)
     row.detail:SetPoint("TOPLEFT", 40, -21)
-    row.detail:SetPoint("RIGHT", -92, 0)
+    row.detail:SetPoint("RIGHT", -138, 0)
     row.detail:SetJustifyH("LEFT")
     row.detail:SetWordWrap(false)
 
     row.value = Theme:CreateText(row, "GameFontHighlightSmall", 10, Theme.text)
     row.value:SetPoint("RIGHT", -10, 0)
-    row.value:SetWidth(74)
+    row.value:SetWidth(120)
     row.value:SetJustifyH("RIGHT")
+
+    row.character = Theme:CreateText(row, "GameFontHighlightSmall", 9, Theme.muted)
+    row.character:SetWidth(120)
+    row.character:SetJustifyH("RIGHT")
+    row.character:SetWordWrap(false)
+    row.character:Hide()
 
     return row
 end
@@ -377,6 +378,7 @@ function UI:RefreshCalendarDay(day)
     ))
 
     local activities = day.completedActivities or {}
+    local showActivityCharacters = UI:ShouldShowActivityCharacters()
     local resetScroll = view.displayedDayKey ~= day.key
     view.displayedDayKey = day.key
     view.empty:SetShown(#activities == 0)
@@ -394,6 +396,23 @@ function UI:RefreshCalendarDay(day)
         Theme:SetText(row.label, activity.name or L.UNKNOWN_ACTIVITY)
         Theme:SetText(row.detail, formatActivityDetail(activity, activity.name))
         Theme:SetText(row.value, formatActivityValue(activity))
+        row.value:ClearAllPoints()
+        row.character:ClearAllPoints()
+        row.character:Hide()
+
+        local activityCharacter = activity.characterKey
+            and AW.Database.db.characters
+            and AW.Database.db.characters[activity.characterKey]
+        if showActivityCharacters and activityCharacter then
+            row.value:SetPoint("TOPRIGHT", -10, -5)
+            Theme:SetText(row.character, activityCharacter.name or L.UNKNOWN_PLAYER)
+            row.character:SetPoint("BOTTOMRIGHT", -10, 5)
+            local classColor = Util:GetClassColor(activityCharacter.classFile)
+            row.character:SetTextColor(unpack(classColor or Theme.muted))
+            row.character:Show()
+        else
+            row.value:SetPoint("RIGHT", -10, 0)
+        end
         row:Show()
     end
 

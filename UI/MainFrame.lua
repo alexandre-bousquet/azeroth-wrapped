@@ -263,6 +263,20 @@ function UI:GetCharacterFilterLabel(ignorePreview)
     return string.format(L.CHARACTER_FILTER_COUNT, count)
 end
 
+function UI:ShouldShowActivityCharacters()
+    if type(self.characterFilter) == "table" then
+        local selectedCount = 0
+        for _, selected in pairs(self.characterFilter) do
+            if selected then
+                selectedCount = selectedCount + 1
+            end
+        end
+        return selectedCount > 1
+    end
+
+    return #self:GetCharacterChoices() > 1
+end
+
 function UI:ToggleCharacterFilter(characterKey)
     self:LoadCharacterFilter()
     local choices = self:GetCharacterChoices()

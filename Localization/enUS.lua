@@ -14,7 +14,6 @@ AW.Locale:Register("enUS", {
     CHARACTER_FILTER_COUNT = "%d characters",
     CHARACTER_FILTER_NAME_REALM = "%s - %s",
     CHARACTER_FILTER_PREVIEW = "Preview characters",
-    ACTIVITY_CHARACTER = "Character: %s",
     SINCE_INSTALL = "Since installation",
     CARD_TIME = "TIME IN AZEROTH",
     CARD_WORLD = "YOUR JOURNEYS",
