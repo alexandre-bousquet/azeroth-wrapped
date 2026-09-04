@@ -194,6 +194,20 @@ local function removeNPCGroupmates(savedDatabase)
     end
 end
 
+local function removeSummonedNPCPositions(savedDatabase)
+    for _, day in pairs(savedDatabase.days or {}) do
+        for _, npc in pairs(day.npcs or {}) do
+            if type(npc) == "table" and Util:IsKnownSummonedNPC(npc.npcID) then
+                npc.isSummoned = true
+                npc.x = nil
+                npc.y = nil
+                npc.positionSource = nil
+                npc.positionSeenAt = nil
+            end
+        end
+    end
+end
+
 function Database:Initialize()
     local now = Util:Now()
     local savedVariableName = AW.savedVariableName or "AzerothWrappedDB"
@@ -257,6 +271,9 @@ function Database:Initialize()
     end
     if previousSchema < 9 then
         removeNPCGroupmates(savedDatabase)
+    end
+    if previousSchema < 10 then
+        removeSummonedNPCPositions(savedDatabase)
     end
 
     savedDatabase.schema = AW.CONST.DB_SCHEMA

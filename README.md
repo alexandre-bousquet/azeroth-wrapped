@@ -2,7 +2,7 @@
 
 **Azeroth Wrapped** transforme votre activité dans World of Warcraft en récapitulatif visuel hebdomadaire, mensuel, saisonnier ou annuel.
 
-La version `1.0.0` est un MVP Retail ciblant l’interface `12.0.7` (`120007`). Elle ne dépend d’aucune bibliothèque externe et n’analyse aucune valeur de combat sensible.
+La version `1.1.0` cible Retail et l’interface `12.0.7` (`120007`). Elle ne dépend d’aucune bibliothèque externe et n’analyse aucune valeur de combat sensible.
 
 ## Fonctionnalités du MVP
 
@@ -18,6 +18,7 @@ La version `1.0.0` est un MVP Retail ciblant l’interface `12.0.7` (`120007`). 
 - vues semaine, mois, saison, année et depuis l’installation ;
 - mode aperçu immédiat sans fausses données persistantes ;
 - huit cartes cliquables donnant accès aux classements et détails de la période sélectionnée ;
+- calendrier d’activité quotidien avec intensité du temps actif et activités terminées ;
 - mode de capture propre pour partager les cartes.
 
 Toutes les données restent dans les `SavedVariables` de World of Warcraft. La collecte commence à l’installation : l’addon ne peut pas reconstruire l’historique antérieur.

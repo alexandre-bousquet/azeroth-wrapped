@@ -356,7 +356,10 @@ function UI:UpdateCards(summary)
         ))
         setText(
             self.cards.activities.tertiary,
-            summary.topCompletedActivity and string.format(L.TOP_COMPLETED_ACTIVITY, summary.topCompletedActivity.name, summary.topCompletedActivity.completions) or ""
+            summary.latestCompletedActivity and string.format(
+                L.LAST_COMPLETED_ACTIVITY,
+                summary.latestCompletedActivity.name or L.UNKNOWN_ACTIVITY
+            ) or ""
         )
     else
         setText(self.cards.activities.primary, L.NO_COMPLETED_ACTIVITIES)

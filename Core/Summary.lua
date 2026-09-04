@@ -68,6 +68,36 @@ local function mergeActivityHistory(target, source)
     end
 end
 
+local function findLatestCompletedActivity(completedActivities)
+    local latest
+    local latestTime = -1
+    local latestSequence = -1
+
+    for _, activity in ipairs((completedActivities and completedActivities.history) or {}) do
+        local completedAt = tonumber(activity.completedAt) or 0
+        local sequence = tonumber(activity.sequence) or 0
+        if completedAt > latestTime or (completedAt == latestTime and sequence > latestSequence) then
+            latest = activity
+            latestTime = completedAt
+            latestSequence = sequence
+        end
+    end
+
+    if latest then
+        return latest
+    end
+
+    for _, activity in pairs((completedActivities and completedActivities.entries) or {}) do
+        local completedAt = tonumber(activity.lastCompletedAt) or 0
+        if not latest or completedAt > latestTime then
+            latest = activity
+            latestTime = completedAt
+        end
+    end
+
+    return latest
+end
+
 local function mergeZones(target, source)
     for sourceKey, zone in pairs(source or {}) do
         local name = type(zone) == "table" and zone.name or nil
@@ -139,6 +169,8 @@ local function mergeNPCs(target, source)
             end
         end
         destination.isMount = npc.isMount or destination.isMount
+        destination.isSummoned = npc.isSummoned or destination.isSummoned
+            or Util:IsKnownSummonedNPC(npc.npcID)
 
         local destinationSeenAt = tonumber(destination.lastSeenAt) or 0
         local sourceSeenAt = tonumber(npc.lastSeenAt) or 0
@@ -153,7 +185,16 @@ local function mergeNPCs(target, source)
             destination.lastSeenAt = npc.lastSeenAt or destination.lastSeenAt
         end
 
-        local sourceHasPosition = npc.x ~= nil and npc.y ~= nil
+        local excludesPosition = destination.isMount or destination.isSummoned
+            or Util:IsKnownSummonedNPC(destination.npcID)
+        if excludesPosition then
+            destination.x = nil
+            destination.y = nil
+            destination.positionSource = nil
+            destination.positionSeenAt = nil
+        end
+
+        local sourceHasPosition = not excludesPosition and npc.x ~= nil and npc.y ~= nil
         local destinationHasPosition = destination.x ~= nil and destination.y ~= nil
         local sourceIsExact = npc.positionSource == "npc"
         local destinationIsExact = destination.positionSource == "npc"
@@ -186,6 +227,279 @@ local function getTimeCounters(container, totalField)
     total = math.max(total, active + afk)
     afk = math.min(afk, total)
     return total, total - afk, afk
+end
+
+local function nextCalendarDay(timestamp)
+    local value = date("*t", timestamp)
+    return time({
+        year = value.year,
+        month = value.month,
+        day = value.day + 1,
+        hour = 12,
+        min = 0,
+        sec = 0,
+    })
+end
+
+local function getMondayWeekday(timestamp)
+    local value = date("*t", timestamp)
+    return ((value.wday + 5) % 7) + 1
+end
+
+local function getTimelineStart(periodKey, startAt, endAt)
+    if periodKey ~= "ALL" then
+        return startAt
+    end
+
+    local oldestTimestamp
+    for dayKey, day in pairs(AW.Database.db.days or {}) do
+        local timestamp = tonumber(day.startedAt) or Util:TimestampFromDayKey(dayKey)
+        if timestamp and (not oldestTimestamp or timestamp < oldestTimestamp) then
+            oldestTimestamp = timestamp
+        end
+    end
+
+    return oldestTimestamp or tonumber(AW.Database.db.meta.createdAt) or endAt
+end
+
+local function copyActivity(activity)
+    local snapshot = {}
+    for field, value in pairs(activity or {}) do
+        snapshot[field] = value
+    end
+    return snapshot
+end
+
+local function buildTimelineDay(dayKey, timestamp, day)
+    day = type(day) == "table" and day or {}
+    local onlineSeconds, activeSeconds, afkSeconds = getTimeCounters(day, "onlineSeconds")
+    local completed = type(day.completedActivities) == "table" and day.completedActivities or {}
+    local activityHistory = {}
+    local activityCounts = { dungeon = 0, raid = 0, outdoor = 0 }
+
+    for _, activity in ipairs(completed.history or {}) do
+        if type(activity) == "table" then
+            local snapshot = copyActivity(activity)
+            activityHistory[#activityHistory + 1] = snapshot
+            local category = snapshot.category == "raid" and "raid"
+                or snapshot.category == "dungeon" and "dungeon"
+                or "outdoor"
+            activityCounts[category] = activityCounts[category] + math.max(1, tonumber(snapshot.completions) or 1)
+        end
+    end
+
+    if #activityHistory == 0 then
+        for activityKey, activity in pairs(completed.entries or {}) do
+            if type(activity) == "table" then
+                local snapshot = copyActivity(activity)
+                snapshot.activityKey = snapshot.activityKey or activityKey
+                snapshot.completedAt = snapshot.completedAt or tonumber(day.startedAt) or timestamp
+                snapshot.legacyAggregate = true
+                activityHistory[#activityHistory + 1] = snapshot
+                local category = snapshot.category == "raid" and "raid"
+                    or snapshot.category == "dungeon" and "dungeon"
+                    or "outdoor"
+                activityCounts[category] = activityCounts[category] + math.max(1, tonumber(snapshot.completions) or 1)
+            end
+        end
+    end
+
+    table.sort(activityHistory, function(left, right)
+        local leftTime = tonumber(left.completedAt) or 0
+        local rightTime = tonumber(right.completedAt) or 0
+        if leftTime == rightTime then
+            return (tonumber(left.sequence) or 0) < (tonumber(right.sequence) or 0)
+        end
+        return leftTime < rightTime
+    end)
+
+    local topCharacter
+    local topCharacterSeconds = -1
+    for _, character in pairs(day.characters or {}) do
+        local seconds = tonumber(character.seconds) or 0
+        if seconds > topCharacterSeconds then
+            topCharacter = character
+            topCharacterSeconds = seconds
+        end
+    end
+
+    local totalActivities = tonumber(completed.total) or 0
+    if totalActivities <= 0 then
+        totalActivities = activityCounts.dungeon + activityCounts.raid + activityCounts.outdoor
+    end
+
+    return {
+        key = dayKey,
+        timestamp = timestamp,
+        weekday = getMondayWeekday(timestamp),
+        onlineSeconds = onlineSeconds,
+        activeSeconds = activeSeconds,
+        afkSeconds = afkSeconds,
+        sessionCount = tonumber(day.sessionCount) or 0,
+        deaths = tonumber(day.deaths and day.deaths.total) or 0,
+        completedActivityCount = totalActivities,
+        completedActivities = activityHistory,
+        activityCounts = activityCounts,
+        activities = day.activities or {},
+        topCharacter = topCharacter,
+    }
+end
+
+function Summary:BuildTimeline(periodKey)
+    local startAt, endAt = AW.Periods:GetRange(periodKey)
+    startAt = getTimelineStart(periodKey, startAt, endAt)
+
+    local cursor = Util:TimestampFromDayKey(Util:DayKey(startAt))
+    local endDay = Util:TimestampFromDayKey(Util:DayKey(endAt))
+    local todayKey = Util:DayKey(endAt)
+    local timeline = {
+        periodKey = periodKey,
+        startAt = startAt,
+        endAt = endAt,
+        days = {},
+        daysByKey = {},
+        totalActivities = 0,
+    }
+
+    while cursor and endDay and cursor <= endDay do
+        local dayKey = Util:DayKey(cursor)
+        local day = buildTimelineDay(dayKey, cursor, AW.Database.db.days[dayKey])
+        day.isToday = dayKey == todayKey
+        timeline.days[#timeline.days + 1] = day
+        timeline.daysByKey[dayKey] = day
+        timeline.totalActivities = timeline.totalActivities + day.completedActivityCount
+        cursor = nextCalendarDay(cursor)
+    end
+
+    return timeline
+end
+
+function Summary:BuildMoneyTimeline(periodKey, knownBalance)
+    local startAt, endAt = AW.Periods:GetRange(periodKey)
+    startAt = getTimelineStart(periodKey, startAt, endAt)
+
+    local cursor = Util:TimestampFromDayKey(Util:DayKey(startAt))
+    local endDay = Util:TimestampFromDayKey(Util:DayKey(endAt))
+    local days = {}
+    local periodNet = 0
+
+    while cursor and endDay and cursor <= endDay do
+        local dayKey = Util:DayKey(cursor)
+        local storedDay = AW.Database.db.days[dayKey]
+        local money = type(storedDay) == "table" and type(storedDay.money) == "table"
+            and storedDay.money or {}
+        local net = tonumber(money.net) or 0
+
+        days[#days + 1] = {
+            key = dayKey,
+            timestamp = cursor,
+            net = net,
+            changes = tonumber(money.changes) or 0,
+        }
+        periodNet = periodNet + net
+        cursor = nextCalendarDay(cursor)
+    end
+
+    local balance = (tonumber(knownBalance) or 0) - periodNet
+    local timeline = {
+        periodKey = periodKey,
+        startAt = startAt,
+        endAt = endAt,
+        openingBalance = balance,
+        closingBalance = tonumber(knownBalance) or 0,
+        net = periodNet,
+        points = {
+            {
+                timestamp = startAt,
+                balance = balance,
+                opening = true,
+            },
+        },
+    }
+
+    for _, day in ipairs(days) do
+        balance = balance + day.net
+        timeline.points[#timeline.points + 1] = {
+            key = day.key,
+            timestamp = day.timestamp,
+            balance = balance,
+            net = day.net,
+            changes = day.changes,
+        }
+    end
+
+    return timeline
+end
+
+function Summary:BuildPreviewTimeline()
+    local now = Util:Now()
+    local startAt = now - (6 * 86400)
+    local cursor = Util:TimestampFromDayKey(Util:DayKey(startAt))
+    local endDay = Util:TimestampFromDayKey(Util:DayKey(now))
+    local timeline = {
+        periodKey = "PREVIEW",
+        startAt = startAt,
+        endAt = now,
+        days = {},
+        daysByKey = {},
+        totalActivities = 0,
+    }
+    local samples = {
+        { online = 7200, active = 6480, sessions = 1, deaths = 0 },
+        { online = 14400, active = 12600, sessions = 2, deaths = 1 },
+        { online = 3600, active = 3300, sessions = 1, deaths = 0 },
+        { online = 21600, active = 18360, sessions = 2, deaths = 4 },
+        { online = 10800, active = 9720, sessions = 1, deaths = 1 },
+        { online = 25200, active = 21600, sessions = 1, deaths = 5 },
+        { online = 14400, active = 12180, sessions = 1, deaths = 1 },
+    }
+    local previewHistory = self:BuildPreview().completedActivities.history or {}
+    local activitiesByDay = {}
+    for _, activity in ipairs(previewHistory) do
+        local activityDayKey = Util:DayKey(activity.completedAt or now)
+        activitiesByDay[activityDayKey] = activitiesByDay[activityDayKey] or {}
+        activitiesByDay[activityDayKey][#activitiesByDay[activityDayKey] + 1] = copyActivity(activity)
+    end
+
+    local index = 1
+    while cursor and endDay and cursor <= endDay do
+        local dayKey = Util:DayKey(cursor)
+        local sample = samples[index] or samples[#samples]
+        local activities = activitiesByDay[dayKey] or {}
+        local counts = { dungeon = 0, raid = 0, outdoor = 0 }
+        for _, activity in ipairs(activities) do
+            local category = activity.category == "raid" and "raid"
+                or activity.category == "dungeon" and "dungeon"
+                or "outdoor"
+            counts[category] = counts[category] + 1
+        end
+        table.sort(activities, function(left, right)
+            return (tonumber(left.completedAt) or 0) < (tonumber(right.completedAt) or 0)
+        end)
+
+        local day = {
+            key = dayKey,
+            timestamp = cursor,
+            weekday = getMondayWeekday(cursor),
+            isToday = dayKey == Util:DayKey(now),
+            onlineSeconds = sample.online,
+            activeSeconds = sample.active,
+            afkSeconds = math.max(0, sample.online - sample.active),
+            sessionCount = sample.sessions,
+            deaths = sample.deaths,
+            completedActivityCount = #activities,
+            completedActivities = activities,
+            activityCounts = counts,
+            activities = {},
+        }
+        timeline.days[#timeline.days + 1] = day
+        timeline.daysByKey[dayKey] = day
+        timeline.totalActivities = timeline.totalActivities + #activities
+        cursor = nextCalendarDay(cursor)
+        index = index + 1
+    end
+
+    return timeline
 end
 
 function Summary:Build(periodKey)
@@ -261,6 +575,7 @@ function Summary:Build(periodKey)
     local _, topNPC = Util:TopEntry(result.npcs, "interactions")
     local _, topBoss = Util:TopEntry(result.encounters.bosses, "kills")
     local _, topCompletedActivity = Util:TopEntry(result.completedActivities.entries, "completions")
+    local latestCompletedActivity = findLatestCompletedActivity(result.completedActivities)
 
     local knownBalance = 0
     local trackedWallets = 0
@@ -281,6 +596,7 @@ function Summary:Build(periodKey)
     result.topNPC = topNPC
     result.topBoss = topBoss
     result.topCompletedActivity = topCompletedActivity
+    result.latestCompletedActivity = latestCompletedActivity
     result.zoneCount = Util:Count(result.zones)
     result.npcCount = Util:Count(result.npcs)
     result.uniqueBossCount = Util:Count(result.encounters.bosses)
@@ -289,6 +605,7 @@ function Summary:Build(periodKey)
     result.warbandBalance = tonumber(AW.Database.db.meta.warbandMoneyCopper)
     result.trackedWallets = trackedWallets
     result.hasMoneyData = trackedWallets > 0
+    result.moneyTimeline = self:BuildMoneyTimeline(periodKey, knownBalance)
     result.hasEncounterData = result.encounters.total > 0
     result.hasCompletedActivityData = result.completedActivities.total > 0
     result.hasData = result.onlineSeconds > 0
@@ -391,6 +708,24 @@ function Summary:BuildPreview()
                 ["preview-alt"] = { name = "Worriades", net = 2150000, earned = 4100000, spent = 1950000, changes = 11, balance = 176745000 },
             },
         },
+        moneyTimeline = {
+            periodKey = "PREVIEW",
+            startAt = Util:Now() - (6 * 86400),
+            endAt = Util:Now(),
+            openingBalance = 851295000,
+            closingBalance = 863745000,
+            net = 12450000,
+            points = {
+                { timestamp = Util:Now() - (6 * 86400), balance = 851295000, opening = true },
+                { timestamp = Util:Now() - (6 * 86400), balance = 852495000, net = 1200000, changes = 4 },
+                { timestamp = Util:Now() - (5 * 86400), balance = 851845000, net = -650000, changes = 3 },
+                { timestamp = Util:Now() - (4 * 86400), balance = 856145000, net = 4300000, changes = 8 },
+                { timestamp = Util:Now() - (3 * 86400), balance = 856145000, net = 0, changes = 0 },
+                { timestamp = Util:Now() - (2 * 86400), balance = 858745000, net = 2600000, changes = 7 },
+                { timestamp = Util:Now() - 86400, balance = 860245000, net = 1500000, changes = 6 },
+                { timestamp = Util:Now(), balance = 863745000, net = 3500000, changes = 10 },
+            },
+        },
         knownBalance = 863745000,
         warbandBalance = 82500000,
         trackedWallets = 3,
@@ -436,6 +771,7 @@ function Summary:BuildPreview()
         topBoss = { name = "Rotmire", kills = 3, instanceName = "Sporefall", instanceType = "raid" },
         uniqueCompletedActivityCount = 5,
         topCompletedActivity = { name = "Rotmire", category = "raid", kind = "boss", completions = 3 },
+        latestCompletedActivity = { name = "Rotmire", category = "raid", kind = "boss", completedAt = Util:Now() - 900 },
         hasEncounterData = true,
         hasCompletedActivityData = true,
         hasData = true,

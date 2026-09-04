@@ -9,6 +9,7 @@ local MAX_DETAIL_ROWS = 100
 local ROW_HEIGHT = 50
 local DEFAULT_SCROLL_TOP = -76
 local SEARCH_SCROLL_TOP = -111
+local GOLD_SCROLL_TOP = -310
 local ACTIVITY_TAB_WIDTH = 203.5
 local PROFILE_URL_POPUP = string.upper(string.gsub(ADDON_NAME or "AzerothWrapped", "%W", "_")) .. "_PROFILE_URL"
 
@@ -437,7 +438,9 @@ local function buildNPCRows(summary)
             local y = tonumber(npc.y)
             local positionText
             local waypoint
-            if npc.isMount then
+            if npc.isSummoned or Util:IsKnownSummonedNPC(npc.npcID) then
+                positionText = L.DETAIL_NPC_SUMMONED
+            elseif npc.isMount then
                 positionText = L.DETAIL_NPC_MOBILE
             elseif npc.mapID and x and y then
                 local locationName = npc.mapName or npc.zoneName or L.UNKNOWN_ZONE
@@ -876,6 +879,13 @@ function UI:CreateDetailPanel(parent)
     panel.scroll:SetScrollChild(panel.content)
     panel.rows = {}
 
+    if self.CreateCalendarView then
+        self:CreateCalendarView(panel)
+    end
+    if self.CreateGoldChart then
+        self:CreateGoldChart(panel)
+    end
+
     panel:Hide()
     self.detailPanel = panel
     return panel
@@ -898,7 +908,10 @@ function UI:RefreshDetails(summary, resetScroll)
     local isCharacterDetail = self.detailKey == "identity"
     local hasSearch = isNPCDetail or isCompanionDetail or isCharacterDetail
     local hasActivityTabs = self.detailKey == "activities"
-    local scrollTop = (hasActivityTabs or hasSearch) and SEARCH_SCROLL_TOP
+    local hasCalendar = self.detailKey == "time" and panel.calendarView and self.RefreshCalendar
+    local hasGoldChart = self.detailKey == "gold" and panel.goldChart and self.RefreshGoldChart
+    local scrollTop = hasGoldChart and GOLD_SCROLL_TOP
+        or (hasActivityTabs or hasSearch) and SEARCH_SCROLL_TOP
         or DEFAULT_SCROLL_TOP
     local searchPlaceholder = isCompanionDetail and L.DETAIL_COMPANION_SEARCH
         or isCharacterDetail and L.DETAIL_CHARACTER_SEARCH
@@ -914,6 +927,29 @@ function UI:RefreshDetails(summary, resetScroll)
     panel.scroll:SetPoint("BOTTOMRIGHT", -34, 14)
 
     summary = summary or self.currentSummary
+
+    panel.title:SetText(L[card.definition.titleKey])
+    panel.title:SetTextColor(unpack(card.definition.accent))
+    panel.icon:SetTexture(card.definition.icon)
+
+    local periodLabel = self.previewMode and L.PREVIEW or AW.Periods:GetLabel(self.periodKey)
+    panel.subtitle:SetText(string.format("%s  •  %s", periodLabel, L.DETAIL_SUBTITLE))
+
+    panel.scroll:SetShown(not hasCalendar)
+    if panel.calendarView then
+        panel.calendarView:SetShown(hasCalendar and true or false)
+    end
+    if panel.goldChart then
+        panel.goldChart:SetShown(hasGoldChart and true or false)
+    end
+    if hasCalendar then
+        self:RefreshCalendar(summary)
+        return
+    end
+    if hasGoldChart then
+        self:RefreshGoldChart(summary)
+    end
+
     local rows = self:GetDetailRows(self.detailKey, summary)
     local totalRows = #rows
 
@@ -932,13 +968,6 @@ function UI:RefreshDetails(summary, resetScroll)
         end
         appendRow(rows, string.format(L.DETAIL_MORE, totalRows - MAX_DETAIL_ROWS), "", "")
     end
-
-    panel.title:SetText(card.definition.title)
-    panel.title:SetTextColor(unpack(card.definition.accent))
-    panel.icon:SetTexture(card.definition.icon)
-
-    local periodLabel = self.previewMode and L.PREVIEW or AW.Periods:GetLabel(self.periodKey)
-    panel.subtitle:SetText(string.format("%s  •  %s", periodLabel, L.DETAIL_SUBTITLE))
 
     for index, rowData in ipairs(rows) do
         local row = panel.rows[index]
@@ -1057,7 +1086,16 @@ function UI:CloseDetails()
         self.activityFilter = "all"
         self.detailPanel.searchBox:SetText("")
         self.detailPanel.searchBox:ClearFocus()
+        if self.detailPanel.calendarView then
+            self.detailPanel.calendarView:Hide()
+        end
+        if self.detailPanel.goldChart then
+            self.detailPanel.goldChart:Hide()
+        end
         self.detailPanel:Hide()
+    end
+    if GameTooltip then
+        GameTooltip:Hide()
     end
     for _, summaryCard in pairs(self.cards) do
         summaryCard:Show()

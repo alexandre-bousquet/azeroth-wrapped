@@ -3,6 +3,10 @@ local _, AW = ...
 AW.Util = {}
 local Util = AW.Util
 
+local KNOWN_SUMMONED_NPC_IDS = {
+    [35642] = true, -- Jeeves
+}
+
 local CYRILLIC_LOWER_REPLACEMENTS = {
     ["А"] = "а", ["Б"] = "б", ["В"] = "в", ["Г"] = "г", ["Д"] = "д", ["Е"] = "е",
     ["Ё"] = "ё", ["Ж"] = "ж", ["З"] = "з", ["И"] = "и", ["Й"] = "й", ["К"] = "к",
@@ -26,6 +30,10 @@ function Util:Now()
     end
 
     return time()
+end
+
+function Util:IsKnownSummonedNPC(npcID)
+    return KNOWN_SUMMONED_NPC_IDS[tonumber(npcID)] == true
 end
 
 function Util:DayKey(timestamp)

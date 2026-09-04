@@ -3,7 +3,7 @@
 ## Notes: Your adventures, turned into a story worth sharing.
 ## Notes-frFR: Vos aventures transformees en une histoire a partager.
 ## Author: Worriades
-## Version: 1.0.0
+## Version: 1.1.0
 ## SavedVariables: AzerothWrappedDB
 ## OptionalDeps: RaiderIO
 ## IconTexture: Interface\AddOns\AzerothWrapped\Media\AzerothWrappedIcon.png
@@ -26,5 +26,7 @@ Trackers/Tracker.lua
 UI/Theme.lua
 UI/MainFrame.lua
 UI/DetailPanel.lua
+UI/CalendarPanel.lua
+UI/GoldChart.lua
 UI/Options.lua
 Core/Commands.lua

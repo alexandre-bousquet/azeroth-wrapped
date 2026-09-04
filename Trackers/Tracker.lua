@@ -172,6 +172,19 @@ local function isMountNPC(guid)
         or unitCheck(UnitIsMinion, "npc")
 end
 
+local function hasNPCOwner()
+    if not UnitOwnerGUID then
+        return false
+    end
+
+    local ok, ownerGUID = pcall(UnitOwnerGUID, "npc")
+    return ok and not isSecret(ownerGUID) and type(ownerGUID) == "string" and ownerGUID ~= ""
+end
+
+local function isSummonedNPC(npcID)
+    return Util:IsKnownSummonedNPC(npcID) or hasNPCOwner()
+end
+
 local function getCoordinates(position)
     if not position or isSecret(position) then
         return nil, nil
@@ -613,13 +626,19 @@ function Tracker:RecordNPCInteraction(service)
         return false
     end
 
-    local day = Database:GetDay()
     local mapID, mapName = getMapInfo()
-    local x, y, positionSource = getNPCMapPosition(mapID)
     local guid = UnitGUID("npc")
     local npcID = getNPCID(guid)
     local title = getNPCTitle()
     local mountNPC = isMountNPC(guid)
+    local summonedNPC = isSummonedNPC(npcID)
+    local skipPosition = mountNPC or summonedNPC
+    local x, y, positionSource
+    if not skipPosition then
+        x, y, positionSource = getNPCMapPosition(mapID)
+    end
+
+    local day = Database:GetDay()
     local key = string.format("%s:%s", tostring(mapID or 0), name)
 
     if not day.npcs[key] then
@@ -633,13 +652,20 @@ function Tracker:RecordNPCInteraction(service)
     npc.npcID = npcID or npc.npcID
     npc.title = title or npc.title
     npc.isMount = mountNPC or npc.isMount
+    npc.isSummoned = summonedNPC or npc.isSummoned
     npc.mapID = mapID or npc.mapID
     npc.mapName = mapName or npc.mapName
     npc.zoneName = (GetSubZoneText and GetSubZoneText() ~= "" and GetSubZoneText()) or npc.zoneName
     npc.lastSeenAt = Util:Now()
 
+    local excludesPosition = npc.isMount or npc.isSummoned or Util:IsKnownSummonedNPC(npc.npcID)
     local hasExactPosition = npc.positionSource == "npc"
-    if x and y and (positionSource == "npc" or not hasExactPosition) then
+    if excludesPosition then
+        npc.x = nil
+        npc.y = nil
+        npc.positionSource = nil
+        npc.positionSeenAt = nil
+    elseif x and y and (positionSource == "npc" or not hasExactPosition) then
         npc.x = x
         npc.y = y
         npc.positionSource = positionSource
@@ -658,7 +684,7 @@ function Tracker:RecordNPCInteraction(service)
     end
 
     Database.db.meta.updatedAt = npc.lastSeenAt
-    return true, positionSource == "npc"
+    return true, excludesPosition or positionSource == "npc"
 end
 
 function Tracker:RecordPlayerInteraction(interactionType)
@@ -667,8 +693,8 @@ function Tracker:RecordPlayerInteraction(interactionType)
         return
     end
 
-    local recorded, hasExactPosition = self:RecordNPCInteraction(service)
-    if (not recorded or not hasExactPosition) and C_Timer and C_Timer.After then
+    local recorded, positionResolved = self:RecordNPCInteraction(service)
+    if (not recorded or not positionResolved) and C_Timer and C_Timer.After then
         C_Timer.After(0.1, function()
             if AW.runtime.loggedIn then
                 Tracker:RecordNPCInteraction(service)
