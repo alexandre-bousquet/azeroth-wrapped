@@ -166,6 +166,12 @@ local function groupDigits(value, separator)
     return table.concat(groups, separator or ",")
 end
 
+function Util:FormatNumber(value)
+    value = math.floor(tonumber(value) or 0)
+    local sign = value < 0 and "-" or ""
+    return sign .. groupDigits(math.abs(value), AW.L.NUMBER_GROUP_SEPARATOR)
+end
+
 function Util:FormatGold(copper, includeSign)
     copper = math.floor(tonumber(copper) or 0)
 

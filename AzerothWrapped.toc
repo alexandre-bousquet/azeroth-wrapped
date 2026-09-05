@@ -31,11 +31,14 @@ Domain\Summary.lua
 
 # Features
 Features\Tracking\Tracker.lua
+Features\Tracking\CurrencyTracker.lua
 
 # User interface
 UI\Foundation\Theme.lua
 UI\Bootstrap.lua
 UI\Components\CardGrid.lua
+UI\Cards\OverviewCards.lua
+UI\Cards\CurrencyCard.lua
 UI\Components\CharacterFilter.lua
 UI\Components\MinimapButton.lua
 UI\Shell\MainWindow.lua
@@ -47,6 +50,7 @@ UI\Panels\Details\CompanionDetails.lua
 UI\Panels\Details\CharacterDetails.lua
 UI\Panels\Details\NPCDetails.lua
 UI\Panels\Details\GoldDetails.lua
+UI\Panels\Details\CurrencyDetails.lua
 UI\Panels\Details\ActivityDetails.lua
 UI\Panels\DetailsPanel.lua
 UI\Panels\CalendarPanel.lua

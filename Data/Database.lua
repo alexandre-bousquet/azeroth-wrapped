@@ -27,12 +27,13 @@ local function newDatabase(now)
             debug = false,
             locale = "AUTO",
             defaultPeriod = "WEEK",
-            cardOrder = { "time", "world", "fate", "companion", "identity", "npcs", "gold", "activities" },
+            cardOrder = { "time", "world", "fate", "companion", "identity", "npcs", "gold", "currencies", "activities" },
             hiddenCards = {},
             trackAFK = true,
             trackGroupmates = true,
             trackNPCs = true,
             trackMoney = true,
+            trackCurrencies = true,
             trackEncounters = true,
             anonymousShare = false,
             retentionDays = AW.CONST.DEFAULT_RETENTION_DAYS,
@@ -370,6 +371,7 @@ function Database:GetDay(timestamp)
             groupmates = {},
             npcs = {},
             money = { net = 0, earned = 0, spent = 0, changes = 0, characters = {} },
+            currencies = { earned = 0, spent = 0, changes = 0, entries = {}, transactions = {} },
             encounters = { total = 0, dungeon = 0, raid = 0, bosses = {} },
             completedActivities = { total = 0, dungeon = 0, raid = 0, outdoor = 0, entries = {}, history = {} },
         }
@@ -386,6 +388,9 @@ function Database:GetDay(timestamp)
     ensureTable(day, "npcs")
     ensureTable(day, "money")
     ensureTable(day.money, "characters")
+    ensureTable(day, "currencies")
+    ensureTable(day.currencies, "entries")
+    ensureTable(day.currencies, "transactions")
     ensureTable(day, "encounters")
     ensureTable(day.encounters, "bosses")
     ensureTable(day, "completedActivities")
@@ -396,6 +401,9 @@ function Database:GetDay(timestamp)
     day.money.earned = tonumber(day.money.earned) or 0
     day.money.spent = tonumber(day.money.spent) or 0
     day.money.changes = tonumber(day.money.changes) or 0
+    day.currencies.earned = tonumber(day.currencies.earned) or 0
+    day.currencies.spent = tonumber(day.currencies.spent) or 0
+    day.currencies.changes = tonumber(day.currencies.changes) or 0
     day.encounters.total = tonumber(day.encounters.total) or 0
     day.encounters.dungeon = tonumber(day.encounters.dungeon) or 0
     day.encounters.raid = tonumber(day.encounters.raid) or 0

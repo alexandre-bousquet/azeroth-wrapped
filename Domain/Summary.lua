@@ -18,6 +18,7 @@ local NUMERIC_FIELDS = {
     earned = true,
     spent = true,
     changes = true,
+    spendingEvents = true,
     sessionCount = true,
 }
 
@@ -33,6 +34,66 @@ local function mergeStructured(target, source)
     for key, value in pairs(source or {}) do
         Util:AddStructuredMetric(target, key, value, NUMERIC_FIELDS)
     end
+end
+
+local function mergeCurrencies(target, source, characterFilter)
+    local merged = false
+
+    for currencyKey, currency in pairs((source and source.entries) or {}) do
+        if type(currency) == "table" then
+            local counters = currency
+            if hasCharacterFilter(characterFilter) then
+                counters = { earned = 0, spent = 0, changes = 0, spendingEvents = 0 }
+                for characterKey, character in pairs(currency.characters or {}) do
+                    if includesCharacter(characterFilter, characterKey) then
+                        counters.earned = counters.earned + (tonumber(character.earned) or 0)
+                        counters.spent = counters.spent + (tonumber(character.spent) or 0)
+                        counters.changes = counters.changes + (tonumber(character.changes) or 0)
+                        counters.spendingEvents = counters.spendingEvents + (tonumber(character.spendingEvents) or 0)
+                        counters.balance = character.balance or counters.balance
+                    end
+                end
+            end
+
+            if (tonumber(counters.changes) or 0) > 0 then
+                local destination = target.entries[currencyKey]
+                if not destination then
+                    destination = {
+                        currencyID = currency.currencyID,
+                        earned = 0,
+                        spent = 0,
+                        changes = 0,
+                        spendingEvents = 0,
+                    }
+                    target.entries[currencyKey] = destination
+                end
+
+                destination.name = currency.name or destination.name
+                destination.iconFileID = currency.iconFileID or destination.iconFileID
+                destination.quality = currency.quality or destination.quality
+                destination.isAccountWide = currency.isAccountWide or destination.isAccountWide
+                destination.balance = counters.balance or currency.balance or destination.balance
+                destination.earned = destination.earned + (tonumber(counters.earned) or 0)
+                destination.spent = destination.spent + (tonumber(counters.spent) or 0)
+                destination.changes = destination.changes + (tonumber(counters.changes) or 0)
+                destination.spendingEvents = destination.spendingEvents + (tonumber(counters.spendingEvents) or 0)
+
+                target.earned = target.earned + (tonumber(counters.earned) or 0)
+                target.spent = target.spent + (tonumber(counters.spent) or 0)
+                target.changes = target.changes + (tonumber(counters.changes) or 0)
+                target.spendingEvents = target.spendingEvents + (tonumber(counters.spendingEvents) or 0)
+                merged = true
+            end
+        end
+    end
+
+    for _, transaction in ipairs((source and source.transactions) or {}) do
+        if type(transaction) == "table" and includesCharacter(characterFilter, transaction.characterKey) then
+            target.transactions[#target.transactions + 1] = transaction
+        end
+    end
+
+    return merged
 end
 
 local function mergeCompletedActivities(target, source)
@@ -633,6 +694,7 @@ function Summary:Build(periodKey, characterFilter)
         groupmates = {},
         npcs = {},
         money = { net = 0, earned = 0, spent = 0, changes = 0, characters = {} },
+        currencies = { earned = 0, spent = 0, changes = 0, spendingEvents = 0, entries = {}, transactions = {} },
         encounters = { total = 0, dungeon = 0, raid = 0, bosses = {} },
         completedActivities = { total = 0, dungeon = 0, raid = 0, outdoor = 0, entries = {}, history = {} },
     }
@@ -707,6 +769,10 @@ function Summary:Build(periodKey, characterFilter)
                     end
                 end
 
+                if mergeCurrencies(result.currencies, day.currencies, characterFilter) then
+                    dayHasData = true
+                end
+
                 for _, activity in ipairs((day.completedActivities and day.completedActivities.history) or {}) do
                     if type(activity) == "table" and includesCharacter(characterFilter, activity.characterKey) then
                         mergeFilteredCompletedActivity(result, activity)
@@ -750,6 +816,7 @@ function Summary:Build(periodKey, characterFilter)
                 mergeCompletedActivities(result.completedActivities.entries, day.completedActivities and day.completedActivities.entries)
                 mergeActivityHistory(result.completedActivities.history, day.completedActivities and day.completedActivities.history)
                 mergeStructured(result.money.characters, day.money and day.money.characters)
+                mergeCurrencies(result.currencies, day.currencies)
 
                 for activity, seconds in pairs(day.activities or {}) do
                     Util:AddMetric(result.activities, activity, seconds)
@@ -766,6 +833,7 @@ function Summary:Build(periodKey, characterFilter)
     local _, topNPC = Util:TopEntry(result.npcs, "interactions")
     local _, topBoss = Util:TopEntry(result.encounters.bosses, "kills")
     local _, topCompletedActivity = Util:TopEntry(result.completedActivities.entries, "completions")
+    local _, topSpentCurrency = Util:TopEntry(result.currencies.entries, "spent")
     local latestCompletedActivity = findLatestCompletedActivity(result.completedActivities)
 
     local knownBalance = 0
@@ -788,6 +856,7 @@ function Summary:Build(periodKey, characterFilter)
     result.topBoss = topBoss
     result.topCompletedActivity = topCompletedActivity
     result.latestCompletedActivity = latestCompletedActivity
+    result.topSpentCurrency = topSpentCurrency
     result.zoneCount = Util:Count(result.zones)
     result.npcCount = Util:Count(result.npcs)
     result.uniqueBossCount = Util:Count(result.encounters.bosses)
@@ -796,12 +865,15 @@ function Summary:Build(periodKey, characterFilter)
     result.warbandBalance = tonumber(AW.Database.db.meta.warbandMoneyCopper)
     result.trackedWallets = trackedWallets
     result.hasMoneyData = trackedWallets > 0
+    result.currencyCount = Util:Count(result.currencies.entries)
+    result.hasCurrencyData = result.currencies.changes > 0
     result.moneyTimeline = self:BuildMoneyTimeline(periodKey, knownBalance, characterFilter)
     result.hasEncounterData = result.encounters.total > 0
     result.hasCompletedActivityData = result.completedActivities.total > 0
     result.hasData = result.onlineSeconds > 0
         or result.sessionCount > 0
         or result.hasMoneyData
+        or result.hasCurrencyData
         or result.hasEncounterData
         or result.hasCompletedActivityData
 
@@ -921,6 +993,24 @@ function Summary:BuildPreview()
         warbandBalance = 82500000,
         trackedWallets = 3,
         hasMoneyData = true,
+        currencies = {
+            earned = 1240,
+            spent = 725,
+            changes = 18,
+            spendingEvents = 6,
+            entries = {
+                ["3008"] = { currencyID = 3008, name = "Valorstones", earned = 900, spent = 525, changes = 11, spendingEvents = 4, balance = 1475 },
+                ["3107"] = { currencyID = 3107, name = "Weathered Crest", earned = 340, spent = 200, changes = 7, spendingEvents = 2, balance = 215 },
+            },
+            transactions = {
+                { currencyID = 3008, currencyName = "Valorstones", amount = 250, timestamp = Util:Now() - 1800, contextKind = "vendor", contextName = "Reshii Wraps", characterKey = "preview-main", characterName = UnitName("player") or "Kalixia" },
+                { currencyID = 3107, currencyName = "Weathered Crest", amount = 100, timestamp = Util:Now() - 5400, destroyReason = 9, characterKey = "preview-alt", characterName = "Worriades" },
+                { currencyID = 3008, currencyName = "Valorstones", amount = 275, timestamp = Util:Now() - 86400, destroyReason = 1, characterKey = "preview-main", characterName = UnitName("player") or "Kalixia" },
+            },
+        },
+        currencyCount = 2,
+        topSpentCurrency = { currencyID = 3008, name = "Valorstones", spent = 525, spendingEvents = 4, balance = 1475 },
+        hasCurrencyData = true,
         encounters = {
             total = 17,
             dungeon = 13,

@@ -281,7 +281,7 @@ function Options:Initialize()
 
     local cardListContainer = CreateFrame("Frame", nil, content, "InsetFrameTemplate")
     cardListContainer:SetPoint("TOPLEFT", 24, -394)
-    cardListContainer:SetSize(540, 156)
+    cardListContainer:SetSize(540, 150)
 
     local cardList = CreateFrame(
         "ScrollFrame",

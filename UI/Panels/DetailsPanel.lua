@@ -496,6 +496,9 @@ function UI:OpenDetails(detailKey)
     for _, summaryCard in pairs(self.cards) do
         summaryCard:Hide()
     end
+    if self.frame and self.frame.cardScroll then
+        self.frame.cardScroll:Hide()
+    end
     self.detailPanel:Show()
     self:RefreshDetails(nil, true)
 end
@@ -522,4 +525,3 @@ function UI:CloseDetails()
     end
     self:ApplyCardLayout()
 end
-

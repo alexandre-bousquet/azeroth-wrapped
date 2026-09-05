@@ -14,10 +14,11 @@ La version `1.2.0` cible Retail et l’interface `12.0.7` (`120007`). Elle ne d�
 - compagnon de groupe le plus fréquent, mesuré au temps passé ensemble ;
 - PNJ rencontrés lors d’interactions ;
 - évolution nette des golds, gains, dépenses et solde connu sur les personnages suivis ;
+- dépenses de monnaies, soldes et historique des sorties, avec l’objet acheté chez les marchands lorsque le client permet de l’identifier ;
 - boss de donjons et de raids vaincus, avec répartition et boss le plus souvent terrassé ;
 - vues semaine, mois, saison, année et depuis l’installation ;
 - mode aperçu immédiat sans fausses données persistantes ;
-- huit cartes cliquables donnant accès aux classements et détails de la période sélectionnée ;
+- cartes cliquables et réorganisables donnant accès aux classements et détails de la période sélectionnée ;
 - filtre global permettant de sélectionner un ou plusieurs personnages ;
 - calendrier d’activité quotidien avec intensité du temps actif et activités terminées ;
 - mode de capture propre pour partager les cartes.

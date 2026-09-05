@@ -5,26 +5,25 @@ local UI = AW.UI
 local L = AW.L
 local Theme = AW.Theme
 
-local CARD_DEFINITIONS = {
-    { key = "time", titleKey = "CARD_TIME", icon = "Interface/Icons/INV_Misc_PocketWatch_01", accent = Theme.cyan },
-    { key = "world", titleKey = "CARD_WORLD", icon = "Interface/Icons/INV_Misc_Map_01", accent = Theme.gold },
-    { key = "fate", titleKey = "CARD_FATE", icon = "Interface/Icons/Ability_Rogue_FeignDeath", accent = Theme.danger },
-    { key = "companion", titleKey = "CARD_COMPANION", icon = "Interface/Icons/Achievement_GuildPerk_EverybodysFriend", accent = Theme.purple },
-    { key = "identity", titleKey = "CARD_IDENTITY", icon = "Interface/Icons/Achievement_Character_Human_Male", accent = Theme.cyan },
-    { key = "npcs", titleKey = "CARD_ENCOUNTERS", icon = "Interface/Icons/INV_Misc_Book_09", accent = Theme.gold },
-    { key = "gold", titleKey = "CARD_GOLD", icon = "Interface/Icons/INV_Misc_Coin_01", accent = Theme.gold },
-    { key = "activities", titleKey = "CARD_ACTIVITIES", icon = "Interface/Icons/Achievement_Boss_LichKing", accent = Theme.danger },
-}
-
+local CARD_DEFINITIONS = {}
 local CARD_DEFINITIONS_BY_KEY = {}
 local DEFAULT_CARD_ORDER = {}
-for _, definition in ipairs(CARD_DEFINITIONS) do
-    CARD_DEFINITIONS_BY_KEY[definition.key] = definition
-    DEFAULT_CARD_ORDER[#DEFAULT_CARD_ORDER + 1] = definition.key
-end
 
 UI.cardDefinitions = CARD_DEFINITIONS_BY_KEY
 UI.defaultCardOrder = DEFAULT_CARD_ORDER
+
+function UI:RegisterCard(definition)
+    if type(definition) ~= "table" or type(definition.key) ~= "string"
+        or definition.key == "" or CARD_DEFINITIONS_BY_KEY[definition.key]
+    then
+        return false
+    end
+
+    CARD_DEFINITIONS[#CARD_DEFINITIONS + 1] = definition
+    CARD_DEFINITIONS_BY_KEY[definition.key] = definition
+    DEFAULT_CARD_ORDER[#DEFAULT_CARD_ORDER + 1] = definition.key
+    return true
+end
 
 local function getCardSettings()
     local database = AW.Database and AW.Database.db
@@ -122,6 +121,9 @@ function UI:ApplyCardLayout()
     end
 
     local order, hidden = self:NormalizeCardSettings()
+    if self.frame.cardScroll then
+        self.frame.cardScroll:SetShown(not self.detailKey)
+    end
     local visibleIndex = 0
     for _, cardKey in ipairs(order) do
         local card = self.cards[cardKey]
@@ -132,10 +134,24 @@ function UI:ApplyCardLayout()
             else
                 local column = visibleIndex % 2
                 local row = math.floor(visibleIndex / 2)
-                card:SetPoint("TOPLEFT", 28 + (column * 438), -158 - (row * 144))
+                card:SetPoint("TOPLEFT", column * 438, -(row * 144))
                 card:Show()
                 visibleIndex = visibleIndex + 1
             end
+        end
+    end
+
+    if self.frame.cardContent then
+        local rows = math.ceil(visibleIndex / 2)
+        local viewportHeight = self.frame.cardScroll:GetHeight()
+        local requiredHeight = math.max(1, rows) * 144 - 12
+        local contentHeight = math.max(viewportHeight, requiredHeight)
+        self.frame.cardContent:SetHeight(contentHeight)
+        if self.frame.cardScroll.ScrollBar then
+            self.frame.cardScroll.ScrollBar:SetShown(requiredHeight > viewportHeight)
+        end
+        if requiredHeight <= viewportHeight then
+            self.frame.cardScroll:SetVerticalScroll(0)
         end
     end
 end
