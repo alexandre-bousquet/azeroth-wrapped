@@ -1,3 +1,4 @@
+-- SavedVariables schema, migrations, and persistence operations.
 local _, AW = ...
 
 AW.Database = {}

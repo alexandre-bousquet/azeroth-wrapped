@@ -1,3 +1,4 @@
+-- Addon namespace, constants, and runtime state shared by every layer.
 local ADDON_NAME, AW = ...
 
 AW.name = ADDON_NAME

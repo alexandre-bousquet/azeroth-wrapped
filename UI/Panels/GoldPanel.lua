@@ -1,3 +1,4 @@
+-- Gold balance chart used by the details panel.
 local _, AW = ...
 
 local UI = AW.UI

@@ -1,3 +1,4 @@
+-- Slash-command parsing and dispatch.
 local _, AW = ...
 
 local L = AW.L

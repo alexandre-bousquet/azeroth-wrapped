@@ -1,3 +1,4 @@
+-- Date-range rules used by summaries and reset operations.
 local _, AW = ...
 
 AW.Periods = {}

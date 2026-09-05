@@ -1,3 +1,4 @@
+-- Blizzard Settings panel and addon preferences.
 local _, AW = ...
 
 AW.Options = {}

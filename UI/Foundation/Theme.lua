@@ -1,3 +1,4 @@
+-- Shared visual tokens and primitive widget factories.
 local _, AW = ...
 
 AW.Theme = {

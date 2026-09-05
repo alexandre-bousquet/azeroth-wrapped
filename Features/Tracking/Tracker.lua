@@ -1,3 +1,4 @@
+-- Gameplay event collection and periodic sampling orchestration.
 local ADDON_NAME, AW = ...
 
 AW.Tracker = CreateFrame("Frame")

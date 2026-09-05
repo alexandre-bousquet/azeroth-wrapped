@@ -1,3 +1,4 @@
+-- Calendar heatmap and daily activity panel.
 local ADDON_NAME, AW = ...
 
 local UI = AW.UI

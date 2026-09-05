@@ -1,3 +1,4 @@
+-- Read-only aggregation of persisted tracking data for presentation.
 local _, AW = ...
 
 AW.Summary = {}

@@ -1,3 +1,4 @@
+-- Generic helpers with no persistence or UI ownership.
 local _, AW = ...
 
 AW.Util = {}

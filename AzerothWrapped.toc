@@ -3,30 +3,55 @@
 ## Notes: Your adventures, turned into a story worth sharing.
 ## Notes-frFR: Vos aventures transformees en une histoire a partager.
 ## Author: Worriades
-## Version: 1.1.0
+## Version: 1.2.0
 ## SavedVariables: AzerothWrappedDB
 ## OptionalDeps: RaiderIO
 ## IconTexture: Interface\AddOns\AzerothWrapped\Media\AzerothWrappedIcon.png
 ## Category: Collections
 
+# Libraries
 Libs\LibStub\LibStub.lua
 Libs\CallbackHandler-1.0\CallbackHandler-1.0.lua
 Libs\LibDataBroker-1.1\LibDataBroker-1.1.lua
 Libs\LibDBIcon-1.0\LibDBIcon-1.0.lua
 
-Core/Bootstrap.lua
-Localization/Locale.lua
-Localization/enUS.lua
-Localization/frFR.lua
-Core/Util.lua
-Core/Database.lua
-Core/Periods.lua
-Core/Summary.lua
-Trackers/Tracker.lua
-UI/Theme.lua
-UI/MainFrame.lua
-UI/DetailPanel.lua
-UI/CalendarPanel.lua
-UI/GoldChart.lua
-UI/Options.lua
-Core/Commands.lua
+# Framework
+Framework\Bootstrap.lua
+Framework\Util.lua
+
+# Localization
+Localization\Locale.lua
+Localization\enUS.lua
+Localization\frFR.lua
+
+# Data and domain
+Data\Database.lua
+Domain\Periods.lua
+Domain\Summary.lua
+
+# Features
+Features\Tracking\Tracker.lua
+
+# User interface
+UI\Foundation\Theme.lua
+UI\Bootstrap.lua
+UI\Components\CardGrid.lua
+UI\Components\CharacterFilter.lua
+UI\Components\MinimapButton.lua
+UI\Shell\MainWindow.lua
+UI\Panels\Details\Helpers.lua
+UI\Panels\Details\TimeDetails.lua
+UI\Panels\Details\WorldDetails.lua
+UI\Panels\Details\FateDetails.lua
+UI\Panels\Details\CompanionDetails.lua
+UI\Panels\Details\CharacterDetails.lua
+UI\Panels\Details\NPCDetails.lua
+UI\Panels\Details\GoldDetails.lua
+UI\Panels\Details\ActivityDetails.lua
+UI\Panels\DetailsPanel.lua
+UI\Panels\CalendarPanel.lua
+UI\Panels\GoldPanel.lua
+UI\Panels\OptionsPanel.lua
+
+# User entry points
+Features\Commands\SlashCommands.lua

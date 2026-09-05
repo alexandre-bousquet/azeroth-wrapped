@@ -2,7 +2,7 @@
 
 **Azeroth Wrapped** transforme votre activité dans World of Warcraft en récapitulatif visuel hebdomadaire, mensuel, saisonnier ou annuel.
 
-La version `1.1.0` cible Retail et l’interface `12.0.7` (`120007`). Elle ne dépend d’aucune bibliothèque externe et n’analyse aucune valeur de combat sensible.
+La version `1.2.0` cible Retail et l’interface `12.0.7` (`120007`). Elle ne dépend d’aucune bibliothèque externe et n’analyse aucune valeur de combat sensible.
 
 ## Fonctionnalités du MVP
 
@@ -55,28 +55,23 @@ Les alias français `semaine`, `mois`, `saison`, `année`, `tout`, `confidential
 
 ## Architecture
 
+Tous les modules Lua sont chargés directement par le `.toc`.
 ```text
 AzerothWrapped/
 ├── AzerothWrapped.toc
-├── AzerothWrappedDev.toc
-├── Core/
-│   ├── Bootstrap.lua
-│   ├── Commands.lua
-│   ├── Database.lua
-│   ├── Periods.lua
-│   ├── Summary.lua
-│   └── Util.lua
+├── Libs/
+├── Framework/
 ├── Localization/
-│   ├── Locale.lua
-│   ├── enUS.lua
-│   └── frFR.lua
-├── Trackers/
-│   └── Tracker.lua
+├── Data/
+├── Domain/
+├── Features/
+│   ├── Tracking/
+│   └── Commands/
 └── UI/
-    ├── DetailPanel.lua
-    ├── MainFrame.lua
-    ├── Options.lua
-    └── Theme.lua
+    ├── Foundation/
+    ├── Components/
+    ├── Shell/
+    └── Panels/
 ```
 
 Le stockage est organisé en agrégats journaliers. Cette structure permet de recalculer plusieurs périodes sans dupliquer les données et limite la croissance du fichier. La rétention détaillée par défaut est de 730 jours.
